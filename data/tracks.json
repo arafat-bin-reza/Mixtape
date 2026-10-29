@@ -22,5 +22,13 @@
     "src": "assets/audio/track-03.wav",
     "duration": 5,
     "source": "repo"
+  },
+  {
+    "id": "track-04",
+    "title": "Alvida Alvida",
+    "artist": "Nabeel Shaukat Ali",
+    "src": "assets/audio/Alvida-Alvida_Dar-E-Nijaat-OST.weba",
+    "duration": 241,
+    "source": "repo"
   }
 ]
