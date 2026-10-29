@@ -1,0 +1,7 @@
+{
+  "name": "music-player",
+  "private": true,
+  "type": "module",
+  "scripts": { "generate": "node scripts/generate-tracks.mjs", "serve": "python3 -m http.server 8000", "test": "playwright test" },
+  "devDependencies": { "@playwright/test": "^1.48.0", "music-metadata": "^10.5.0" }
+}
