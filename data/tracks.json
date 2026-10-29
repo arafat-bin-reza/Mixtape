@@ -3,24 +3,8 @@
     "id": "track-01",
     "title": "track 01",
     "artist": "Unknown artist",
-    "src": "assets/audio/track-01.wav",
+    "src": "assets/audio/Alvida-Alvida_Dar-E-Nijaat-OST.weba",
     "duration": 6,
-    "source": "repo"
-  },
-  {
-    "id": "track-02",
-    "title": "track 02",
-    "artist": "Unknown artist",
-    "src": "assets/audio/track-02.wav",
-    "duration": 9,
-    "source": "repo"
-  },
-  {
-    "id": "track-03",
-    "title": "track 03",
-    "artist": "Unknown artist",
-    "src": "assets/audio/track-03.wav",
-    "duration": 5,
     "source": "repo"
   }
 ]
