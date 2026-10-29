@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "id": "track-01",
+    "title": "Morning Arpeggio",
+    "artist": "Demo Synth",
+    "src": "assets/audio/track-01.wav",
+    "duration": 6,
+    "source": "repo"
+  },
+  {
+    "id": "track-02",
+    "title": "Slow Tide",
+    "artist": "Demo Synth",
+    "src": "assets/audio/track-02.wav",
+    "duration": 9,
+    "source": "repo"
+  },
+  {
+    "id": "track-03",
+    "title": "Night Shift",
+    "artist": "Demo Synth",
+    "src": "assets/audio/track-03.wav",
+    "duration": 5,
+    "source": "repo"
+  }
+]
