@@ -25,8 +25,8 @@
   },
   {
     "id": "track-04",
-    "title": "Alvida Alvida",
-    "artist": "Nabeel Shaukat Ali",
+    "title": "track 04",
+    "artist": "Unknown artist",
     "src": "assets/audio/track-04.wav",
     "duration": 241,
     "source": "repo"
