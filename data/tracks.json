@@ -1,10 +1,18 @@
 [
   {
-    "id": "alvida-alvida-dar-e-nijaat-ost",
-    "title": "Alvida Alvida Dar E Nijaat OST",
-    "artist": "Unknown artist",
-    "src": "assets/audio/Alvida-Alvida_Dar-E-Nijaat-OST.wav",
+    "id": "alvida-alvida",
+    "title": "Alvida Alvida Dar E Nijaat",
+    "artist": "Nabeel Shaukat Ali",
+    "src": "assets/audio/alvida-alvida.wav",
     "duration": 241,
+    "source": "repo"
+  },
+  {
+    "id": "majboor.wav",
+    "title": "Majboor",
+    "artist": "Sheheryar Rehan x Zoha Waseem",
+    "src": "assets/audio/majboor.wav",
+    "duration": 158,
     "source": "repo"
   }
 ]
