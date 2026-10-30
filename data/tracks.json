@@ -1,18 +1,18 @@
 [
   {
     "id": "alvida-alvida",
-    "title": "Alvida Alvida Dar E Nijaat",
-    "artist": "Nabeel Shaukat Ali",
+    "title": "alvida alvida",
+    "artist": "Unknown artist",
     "src": "assets/audio/alvida-alvida.wav",
     "duration": 241,
     "source": "repo"
   },
   {
-    "id": "majboor.wav",
-    "title": "Majboor",
-    "artist": "Sheheryar Rehan x Zoha Waseem",
+    "id": "majboor",
+    "title": "majboor",
+    "artist": "Unknown artist",
     "src": "assets/audio/majboor.wav",
-    "duration": 158,
+    "duration": 159,
     "source": "repo"
   }
 ]
