@@ -2,6 +2,12 @@
   "name": "music-player",
   "private": true,
   "type": "module",
-  "scripts": { "generate": "node scripts/generate-tracks.mjs", "serve": "python3 -m http.server 8000", "test": "playwright test" },
+  "scripts": {
+    "generate": "node scripts/generate-tracks.mjs",
+    "serve": "node scripts/serve.mjs 8000",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit && playwright test"
+  },
   "devDependencies": { "@playwright/test": "^1.48.0", "music-metadata": "^10.5.0" }
 }
