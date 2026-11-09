@@ -4,6 +4,10 @@
 // The API exposes no volume control and no "ended" event. Play, pause and end are derived from the
 // `playback_update` stream (position/duration in ms, isPaused). Visitors who are not logged in to Spotify
 // in this browser hear a 30 s preview; that is reported through handlers.onPreview so the UI can say so.
+//
+// Collections (album, playlist, show, artist) load whole; the embed plays through the items itself and
+// reports each one's URI in `playingURI`. Item changes are reported through handlers.onItem, and the
+// collection counts as ended when the embed stops after its last item.
 import { loadScript } from "./sdk.js";
 
 const API = "https://open.spotify.com/embed/iframe-api/v1";
@@ -24,20 +28,44 @@ function ready() {
 
 export function createSpotify({ container, handlers }) {
   let controller = null, init = null, embedReady = null, destroyed = false;
-  let uri = null, dur = 0, pos = 0, maxPos = 0, playing = false, started = false, ended = false, preview = false;
+  let uri = null, collection = false, item = null, endTimer = null;
+  let dur = 0, pos = 0, maxPos = 0, playing = false, started = false, ended = false, preview = false;
   const wrap = document.createElement("div");
   wrap.className = "sp";
   container.append(wrap);
 
+  const resetItem = () => { pos = 0; maxPos = 0; ended = false; clearTimeout(endTimer); };
   const resetTrack = (track) => {
-    uri = track.externalId; dur = track.duration || 0; pos = 0; maxPos = 0;
-    playing = false; started = false; ended = false; preview = false;
+    uri = track.externalId; collection = /^spotify:(album|playlist|show|artist):/.test(uri);
+    item = null; dur = track.duration || 0;
+    resetItem(); playing = false; started = false; preview = false;
   };
+
+  // Observed live: at the end of an item the embed reports position === duration with isPaused still false and
+  // then goes quiet; in a collection the next item's update follows within ~100 ms, after the last item nothing
+  // follows at all. So "ended" = reached the end and no further progress for this item within a short grace period.
+  function armEnd() {
+    ended = true;
+    const which = collection ? item : uri;
+    clearTimeout(endTimer);
+    endTimer = setTimeout(() => {
+      if (destroyed || !ended || (collection ? item : uri) !== which) return;
+      if (pos > 0 && pos < dur - 1.5) return; // user seeked back
+      playing = false;
+      handlers.onEnded();
+    }, 1200);
+  }
 
   function onUpdate(e) {
     if (destroyed) return;
     const d = e?.data || {};
-    if (d.playingURI && uri && d.playingURI !== uri) return; // stale event from the previous entity
+    if (d.playingURI && !collection && uri && d.playingURI !== uri) return; // stale event from the previous entity
+    if (collection && d.playingURI && d.playingURI !== uri && d.playingURI !== item) {
+      // The embed moved to another item in the collection.
+      item = d.playingURI;
+      resetItem(); dur = 0;
+      handlers.onItem?.(item);
+    }
     const duration = (d.duration || 0) / 1000, position = (d.position || 0) / 1000;
     if (duration > 0) {
       if (duration !== dur) { dur = duration; handlers.onDuration(duration); }
@@ -48,14 +76,15 @@ export function createSpotify({ container, handlers }) {
     handlers.onTime(position);
     if (!d.isPaused) {
       maxPos = Math.max(maxPos, position);
-      if (!playing) { playing = true; started = true; ended = false; handlers.onPlay(); }
+      if (!playing) { playing = true; started = true; ended = false; clearTimeout(endTimer); handlers.onPlay(); }
+      if (!ended && dur > 0 && position >= dur - 0.25) armEnd();
       return;
     }
-    if (!playing) return;
+    if (!playing || ended) return;
     playing = false;
     const nearEnd = dur > 0 && position >= dur - 1.5;
     const rewound = position === 0 && maxPos > 0;
-    if (!ended && dur > 0 && maxPos >= dur * 0.5 && (nearEnd || rewound)) { ended = true; handlers.onEnded(); }
+    if (dur > 0 && maxPos >= dur * 0.5 && (nearEnd || rewound)) armEnd(); // some players pause or rewind at the end instead
     else handlers.onPause();
   }
 
@@ -96,6 +125,7 @@ export function createSpotify({ container, handlers }) {
     duration: () => dur,
     destroy() {
       destroyed = true;
+      clearTimeout(endTimer);
       try { controller?.destroy(); } catch { /* ignore */ }
       controller = null;
       wrap.remove();

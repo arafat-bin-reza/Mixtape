@@ -15,16 +15,22 @@ const SC_RESERVED = new Set(["discover", "search", "stream", "you", "upload", "p
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
 const SP_ID = /^[A-Za-z0-9]{22}$/;
 const SP_SINGLE = new Set(["track", "episode"]);
-const SP_COLLECTION = new Set(["album", "playlist", "show", "artist"]);
+/** Collections load whole into the Spotify embed, which plays through them itself; one playlist row each. */
+export const SP_COLLECTION = new Set(["album", "playlist", "show", "artist"]);
+export const SP_KIND_LABEL = { album: "Spotify album", playlist: "Spotify playlist", show: "Spotify podcast", artist: "Spotify artist" };
 const SP_URI = /^spotify:([a-z]+):([A-Za-z0-9]+)$/i;
 const SP_PATH = /^\/(?:intl-[a-z]{2}(?:-[a-z]{2})?\/)?(?:embed\/)?([a-z]+)\/([A-Za-z0-9]+)/i;
 
 function spotify(kind, id) {
   kind = kind.toLowerCase();
-  if (SP_COLLECTION.has(kind)) return { error: "playlist" };
-  if (!SP_SINGLE.has(kind) || !SP_ID.test(id)) return { error: "invalid" };
-  return { provider: "spotify", kind, externalId: `spotify:${kind}:${id}`, canonicalUrl: `https://open.spotify.com/${kind}/${id}`, id: `url-spotify-${id}` };
+  const collection = SP_COLLECTION.has(kind);
+  if ((!collection && !SP_SINGLE.has(kind)) || !SP_ID.test(id)) return { error: "invalid" };
+  return {
+    provider: "spotify", kind, collection, externalId: `spotify:${kind}:${id}`, canonicalUrl: `https://open.spotify.com/${kind}/${id}`,
+    id: collection ? `url-spotify-${kind}-${id}` : `url-spotify-${id}`,
+  };
 }
+export const isCollection = (t) => t?.provider === "spotify" && SP_COLLECTION.has(t.kind);
 
 const host = (u) => u.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
 export const hash = (s) => { let h = 5381; for (const c of String(s)) h = (Math.imul(h, 33) + c.codePointAt(0)) >>> 0; return h.toString(36); };
@@ -132,23 +138,32 @@ export async function describe(p) {
   }
   return {
     title: meta?.title || "Untitled",
-    artist: meta?.author_name || PROVIDER_NAMES[p.provider],
+    artist: meta?.author_name || SP_KIND_LABEL[p.kind] || PROVIDER_NAMES[p.provider],
     cover: meta?.thumbnail_url || (p.provider === "youtube" ? `https://i.ytimg.com/vi/${p.externalId}/hqdefault.jpg` : null),
     duration: meta?.duration ? Math.round(meta.duration) : undefined,
   };
 }
 
+const itemCache = new Map();
+/** Title and artwork for one item inside a Spotify collection (a `spotify:track:...` URI), via oEmbed; cached. */
+export function describeItem(uri) {
+  if (!itemCache.has(uri)) {
+    itemCache.set(uri, getJson(OEMBED.spotify(uri)).then((m) => ({ title: m?.title || "", cover: m?.thumbnail_url || null })).catch(() => ({ title: "", cover: null })));
+  }
+  return itemCache.get(uri);
+}
+
 export function toTrack(rec) {
   return {
     id: rec.id, title: rec.title, artist: rec.artist, src: rec.canonicalUrl, cover: rec.cover ?? null, duration: rec.duration,
-    provider: rec.provider, externalId: rec.externalId, hash: rec.hash, source: "url", added: rec.added,
+    provider: rec.provider, externalId: rec.externalId, hash: rec.hash, kind: rec.kind, source: "url", added: rec.added,
   };
 }
 
 /** Persists a URL track record and returns the playlist track. */
 export async function save(rec) {
   const record = {
-    id: rec.id, provider: rec.provider, externalId: rec.externalId, hash: rec.hash, canonicalUrl: rec.canonicalUrl,
+    id: rec.id, provider: rec.provider, externalId: rec.externalId, hash: rec.hash, kind: rec.kind, canonicalUrl: rec.canonicalUrl,
     title: rec.title, artist: rec.artist, cover: rec.cover ?? null, duration: rec.duration, added: rec.added ?? Date.now(),
   };
   try { await tx(STORES.url, "readwrite", (s) => s.put(record)); } catch { /* storage unavailable: still playable this session */ }

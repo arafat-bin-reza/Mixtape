@@ -549,7 +549,7 @@ Total: roughly 3.75 developer-days. Steps 1-2 alone make Spotify links recognise
 
 - **Metadata via the Web API.** A serverless function holding a Client Credentials token (same deployment model as section 17) could return artist, album, duration and a 640 px cover for a Spotify id, and expand album/playlist links into individual rows. Mixtape would call it through a `config.json` `spotifyMetadataUrl`. The Web API deprecations of November 2024 (no 30 s `preview_url` for new apps, no audio features) do not affect basic track lookup.
 - **Web Playback SDK tier.** Full-length audio-only playback with volume control for Premium listeners who log in with PKCE. Blocked today by Development Mode's user cap and the non-commercial clause; revisit if Spotify's quota policy changes. Would be a separate engine (`spotify-sdk`) chosen when a valid token is present, falling back to the embed engine otherwise.
-- **Collection rows.** Load an album or playlist into the embed as a single "collection" row that reports the currently playing item from `playingURI`. Cheap to build but breaks the one-row-one-track model, so it needs a UX decision first.
+- ~~**Collection rows.**~~ Done (2026-11-09): album, playlist, show and artist links are one row each; the embed plays through the items, `playingURI` drives the Now Playing heading via oEmbed, and the row ends when the embed goes quiet after the last item. Mixtape's next/previous still move between rows; moving within the collection is done in the embed's own track list.
 - **"Open in Spotify" action** on the row and in Media Session, using `canonicalUrl`.
 
 ## 29. Acceptance Criteria
@@ -578,7 +578,9 @@ Total: roughly 3.75 developer-days. Steps 1-2 alone make Spotify links recognise
 | Autoplay after load | `controller.play()` after `ready` started playback without a gesture when Chromium allowed autoplay. Real browsers require the click that Mixtape already has. |
 | oEmbed | `title` and 300 px `thumbnail_url` returned; artist absent, so the row shows "Spotify" until edited. |
 
-Not yet verified live: the exact `playback_update` pattern at track end (the engine accepts both "rewound to 0 and paused" and "paused within 1.5 s of the end", each only after the track passed 50%), `seek()` while paused, switching between two Spotify tracks via `loadEntity`, Safari and Firefox, and a logged-in session. These are the step 6 manual checklist.
+**End of track and collections (live, later the same day):** `seek()` works during playback. At the end of an item the embed reports `position === duration` with `isPaused: false` and then **sends nothing more**: no pause, no rewind. In an album the next item's update (`playingURI` changes, `position: 0`) follows within about 100 ms, and after the last item nothing follows at all. The engine therefore treats "reached the end, then no progress for 1.2 s on the same item" as ended, and keeps the pause/rewind heuristics only as a fallback. Verified: a single track advanced to the next row about 4 s after its end; an 8-track album walked through every item (heading showed each title via oEmbed on the `spotify:track:` URI) and advanced to the next row after the last; a mid-track pause stayed a pause. oEmbed accepts bare URIs and names albums, playlists and artists.
+
+Not yet verified live: Safari and Firefox, a logged-in session, and switching between two Spotify rows via `loadEntity`. These remain the step 6 manual checklist.
 
 **Implementation notes that differ from sections 24.2-24.3:**
 

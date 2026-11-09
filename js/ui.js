@@ -36,8 +36,7 @@ function badgeFor(t) {
 }
 
 function renderTrack(t) {
-  $("title").textContent = t ? t.title : "Nothing playing";
-  $("artist").textContent = t ? t.artist : "Add files or paste a link to start";
+  renderHeading(t, null);
   $("cover").style.setProperty("--h", t ? hue(t.id) : 220);
   $("cover").dataset.embed = EMBEDDED.has(t?.provider) ? t.provider : "";
   $("vol-hint").hidden = t?.provider !== "spotify";
@@ -47,8 +46,22 @@ function renderTrack(t) {
   img.loading = "lazy";
   img.onerror = () => (img.hidden = true);
   if (t?.cover) img.src = t.cover;
-  document.title = t ? `${t.title} · Music Player` : "Music Player";
-  $("live").textContent = t ? `${t.title} by ${t.artist}` : "";
+}
+
+/** Now Playing heading. For a Spotify collection, shows the item the embed is playing with the collection beneath it. */
+function renderHeading(t, item) {
+  const show = (title, sub) => {
+    $("title").textContent = title;
+    $("artist").textContent = sub;
+    document.title = t ? `${title} · Music Player` : "Music Player";
+    $("live").textContent = t ? `${title}, ${sub}` : "";
+  };
+  if (!t) return show("Nothing playing", "Add files or paste a link to start");
+  if (!item || !urlTracks.isCollection(t)) return show(t.title, t.artist);
+  urlTracks.describeItem(item).then((m) => {
+    if (getState().item !== item || playlist.current()?.id !== t.id) return;
+    show(m.title || t.title, m.title ? `${t.title} · ${t.artist}` : t.artist);
+  });
 }
 
 function renderList(s) {
@@ -92,7 +105,8 @@ function renderList(s) {
 
 function render(s) {
   const t = s.tracks[s.order[s.position]];
-  if (t?.id !== last.id) { last.id = t?.id; renderTrack(t); }
+  if (t?.id !== last.id) { last.id = t?.id; last.item = null; renderTrack(t); }
+  if (s.item !== last.item) { last.item = s.item; renderHeading(t, s.item); }
   const key = [s.tracks, s.position, s.order, s.failed];
   if (key.some((v, i) => v !== last.key?.[i])) { last.key = key; renderList(s); }
 
@@ -273,7 +287,9 @@ async function checkLink() {
   img.hidden = !meta.cover;
   img.onerror = () => (img.hidden = true);
   if (meta.cover) img.src = meta.cover;
-  const note = p.provider === "spotify" ? " · 30 s preview unless you're logged in to Spotify in this browser" : "";
+  const note = p.provider === "spotify"
+    ? (p.collection ? " · plays the whole thing in the Spotify player; 30 s previews unless you're logged in to Spotify" : " · 30 s preview unless you're logged in to Spotify in this browser")
+    : "";
   $("link-provider").textContent = `${urlTracks.PROVIDER_NAMES[p.provider]}${meta.duration ? ` · ${formatTime(meta.duration)}` : ""}${note}`;
   $("link-preview").hidden = false;
   setStatus(status, "");

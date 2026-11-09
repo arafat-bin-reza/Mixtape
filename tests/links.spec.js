@@ -106,10 +106,10 @@ test("YouTube link uses oEmbed metadata and the stubbed player", async ({ page }
   await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
 });
 
-test("Spotify link plays through the stubbed embed and reports preview, pause and end", async ({ page }) => {
-  await page.route("https://open.spotify.com/oembed**", (r) => r.fulfill({ json: { title: "Stub Song", thumbnail_url: `${TONE}#thumb`, provider_name: "Spotify" } }));
+/** Stubs Spotify's oEmbed (per request URL) and iFrame API. The fake controller records calls and the test emits playback_update events. */
+async function stubSpotify(page, oembed = () => ({ title: "Stub Song", thumbnail_url: `${TONE}#thumb`, provider_name: "Spotify" })) {
+  await page.route("https://open.spotify.com/oembed**", (r) => r.fulfill({ json: oembed(r.request().url()) }));
   await page.route("https://noembed.com/**", (r) => r.fulfill({ json: {} }));
-  // Fake iFrame API: records controller calls and lets the test emit playback_update events.
   await page.route("https://open.spotify.com/embed/iframe-api/v1", (r) => r.fulfill({ contentType: "text/javascript", body: `
     window.__sp = { calls: [], listeners: {}, uri: null, dur: 213000 };
     window.__sp.emit = (data) => (window.__sp.listeners.playback_update || []).forEach((fn) => fn({ data: { playingURI: window.__sp.uri, isBuffering: false, duration: window.__sp.dur, ...data } }));
@@ -129,7 +129,10 @@ test("Spotify link plays through the stubbed embed and reports preview, pause an
     } };
     window.onSpotifyIframeApiReady?.(api);
   ` }));
+}
 
+test("Spotify link plays through the stubbed embed and reports preview, pause and end", async ({ page }) => {
+  await stubSpotify(page);
   await page.goto("/");
   await page.click("#add-link");
   await page.fill("#link-url", "https://open.spotify.com/intl-de/track/4cOdK2wGLETKBW3PvgPWqT?si=share");
@@ -162,14 +165,58 @@ test("Spotify link plays through the stubbed embed and reports preview, pause an
   await expect(page.locator("#preview-hint")).toBeVisible();
   await expect(page.locator("#dur")).toHaveText("0:30");
 
-  // End of track: the embed rewinds to 0 and pauses. With repeat "all" the playlist advances once, to the first row.
+  // End of track, as the real embed does it: position reaches duration with isPaused still false, then silence.
+  // With repeat "all" the playlist advances once, to the first row.
   await page.click("#repeat");
-  await page.evaluate(() => { window.__sp.emit({ isPaused: false, position: 29000 }); window.__sp.emit({ isPaused: true, position: 0 }); });
+  await page.evaluate(() => { window.__sp.emit({ isPaused: false, position: 29000 }); window.__sp.emit({ isPaused: false, position: 30000 }); });
   await expect(rows.first()).toHaveAttribute("aria-current", "true");
   await expect(page.locator("#cover")).toHaveAttribute("data-embed", "");
   await expect(page.locator("#preview-hint")).toBeHidden();
   await expect(page.locator("#vol-hint")).toBeHidden();
   expect(await page.evaluate(() => window.__sp.calls.at(-1))).toEqual(["destroy"]);
+});
+
+test("Spotify album is one row whose heading follows the item being played, and ends after the last item", async ({ page }) => {
+  await stubSpotify(page, (url) => (url.includes("spotify%3Atrack%3A")
+    ? { title: "Item " + decodeURIComponent(url).slice(-1) }
+    : { title: "Stub Album", thumbnail_url: `${TONE}#thumb` }));
+  await page.goto("/");
+  await page.click("#add-link");
+  await page.fill("#link-url", "https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3");
+  await expect(page.locator("#link-title-input")).toHaveValue("Stub Album");
+  await expect(page.locator("#link-artist")).toHaveValue("Spotify album");
+  await expect(page.locator("#link-provider")).toContainText("whole thing");
+  await page.click("#link-add");
+
+  const rows = page.locator("#tracks li");
+  const row = rows.last();
+  await expect(row.locator(".badge")).toHaveText("Spotify");
+  await expect(row.locator("small")).toHaveText("Spotify album");
+  await row.locator(".row").click();
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+  await expect(page.locator("#title")).toHaveText("Stub Album");
+  expect(await page.evaluate(() => window.__sp.calls[0])).toEqual(["create", "spotify:album:1DFixLWuPkv3KT3TnV35m3"]);
+
+  // The embed reports which item is playing; the heading shows it with the collection beneath.
+  await page.evaluate(() => { window.__sp.dur = 200000; window.__sp.emit({ playingURI: "spotify:track:A1", isPaused: false, position: 0 }); });
+  await expect(page.locator("#title")).toHaveText("Item 1");
+  await expect(page.locator("#artist")).toHaveText("Stub Album · Spotify album");
+  await expect(page.locator("#dur")).toHaveText("3:20");
+
+  // Item 1 reaches its end and item 2 follows at once: the row keeps playing.
+  await page.evaluate(() => { window.__sp.emit({ playingURI: "spotify:track:A1", isPaused: false, position: 200000 }); window.__sp.emit({ playingURI: "spotify:track:A2", isPaused: false, position: 0 }); });
+  await expect(page.locator("#title")).toHaveText("Item 2");
+  await expect(page.locator("#cur")).toHaveText("0:00");
+  await page.waitForTimeout(1600);
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+
+  // The last item ends and the embed goes quiet: the row is over and, with repeat "all", the first row plays.
+  await page.click("#repeat");
+  await page.evaluate(() => window.__sp.emit({ playingURI: "spotify:track:A2", isPaused: false, position: 200000 }));
+  await expect(rows.first()).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#title")).not.toHaveText("Item 2");
+  await expect(page.locator("#artist")).not.toContainText("Spotify album");
 });
 
 test("pasting a link on the page opens the dialog pre-filled", async ({ page }) => {

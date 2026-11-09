@@ -26,6 +26,7 @@ function make(factory) {
     onError: (e) => live() && callbacks.onError?.(e),
     onBlocked: () => live() && setState({ playing: false }),
     onPreview: (p) => live() && setState({ preview: !!p }),
+    onItem: (uri) => live() && setState({ item: uri || null, currentTime: 0 }),
   });
   return eng;
 }
@@ -58,7 +59,7 @@ function sync(s) {
   if (t.id !== loadedId) {
     loadedId = t.id;
     const eng = engineFor(t);
-    setState({ currentTime: 0, duration: t.duration || 0, preview: false });
+    setState({ currentTime: 0, duration: t.duration || 0, preview: false, item: null });
     applyVolume(getState());
     Promise.resolve()
       .then(() => eng.load(t, { autoplay: getState().playing }))

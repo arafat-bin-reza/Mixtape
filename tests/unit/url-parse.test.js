@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parse, errorMessage, toTrack } from "../../js/url-tracks.js";
+import { parse, errorMessage, toTrack, isCollection } from "../../js/url-tracks.js";
 
 const yt = (input) => { const p = parse(input); assert.equal(p.provider, "youtube", input); assert.equal(p.externalId, "dQw4w9WgXcQ", input); return p; };
 
@@ -61,7 +61,7 @@ test("unsupported platforms are named", () => {
 
 test("Spotify track and episode links", () => {
   const id = "4cOdK2wGLETKBW3PvgPWqT";
-  const expected = { provider: "spotify", kind: "track", externalId: `spotify:track:${id}`, canonicalUrl: `https://open.spotify.com/track/${id}`, id: `url-spotify-${id}` };
+  const expected = { provider: "spotify", kind: "track", collection: false, externalId: `spotify:track:${id}`, canonicalUrl: `https://open.spotify.com/track/${id}`, id: `url-spotify-${id}` };
   for (const u of [
     `https://open.spotify.com/track/${id}`,
     `https://open.spotify.com/track/${id}?si=abc&nd=1`,
@@ -76,9 +76,22 @@ test("Spotify track and episode links", () => {
   assert.equal(ep.kind, "episode");
   assert.equal(ep.externalId, "spotify:episode:7makk4oTQel546B0PZlDM5");
   assert.equal(parse("spotify:episode:7makk4oTQel546B0PZlDM5").id, ep.id);
-  for (const u of ["https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3", "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", "https://open.spotify.com/show/4rOoJ6Egrf8K2IrywzwOMk", "spotify:album:1DFixLWuPkv3KT3TnV35m3"]) {
-    assert.equal(parse(u).error, "playlist", u);
+  // Collections are accepted as one row each; the embed plays through them.
+  const album = parse("https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3");
+  assert.deepEqual(album, { provider: "spotify", kind: "album", collection: true, externalId: "spotify:album:1DFixLWuPkv3KT3TnV35m3", canonicalUrl: "https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3", id: "url-spotify-album-1DFixLWuPkv3KT3TnV35m3" });
+  assert.equal(parse("spotify:album:1DFixLWuPkv3KT3TnV35m3").id, album.id);
+  for (const [u, kind] of [
+    ["https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x", "playlist"],
+    ["https://open.spotify.com/show/4rOoJ6Egrf8K2IrywzwOMk", "show"],
+    ["https://open.spotify.com/intl-fr/artist/0gxyHStUsqpMadRV0Di1Qt", "artist"],
+  ]) {
+    const p = parse(u);
+    assert.equal(p.kind, kind, u);
+    assert.equal(p.collection, true, u);
+    assert.ok(isCollection({ provider: "spotify", kind: p.kind }), u);
   }
+  assert.equal(isCollection({ provider: "spotify", kind: "track" }), false);
+  assert.equal(parse("https://open.spotify.com/album/short").error, "invalid");
   assert.equal(parse(`https://open.spotify.com/track/${id.slice(1)}`).error, "invalid", "21 chars");
   assert.equal(parse(`https://open.spotify.com/track/${id}x`).error, "invalid", "23 chars");
   assert.equal(parse("https://open.spotify.com/").error, "invalid");

@@ -35,7 +35,7 @@ The project is open source under the MIT License (copyright 2026, Arafat Bin Rez
 - Plays the repository's demo tracks (currently two: *Alvida Alvida* by Nabeel Shaukat Ali and *Majboor* by Sheheryar Rehan x Zoha Waseem).
 - **Add files**: uploads audio or video (MP3, M4A, AAC, OGG, Opus, WAV, FLAC, MP4, WebM, MOV; up to 100 MB each) to Cloudinary with an editable title and artist, shows progress, and plays the result as audio. If the upload fails or the device is offline, the listener can keep the file on the device only (browser storage). A fork with no Cloudinary account falls back to device-only storage automatically.
 - **Add link** (or paste anywhere on the page): plays direct audio/video URLs natively, and SoundCloud, YouTube, Vimeo and Spotify tracks through each platform's official embedded player. Title, artwork and (where offered) duration are fetched automatically and remain editable. Duplicate links are detected. Facebook, Instagram, TikTok and X links are declined with an explanation.
-- **Spotify specifics**: plays through Spotify's own embedded player, so the listener hears the full track when logged in to Spotify in that browser and a 30-second preview otherwise. Albums and playlists are not supported yet; single tracks and podcast episodes are.
+- **Spotify specifics**: plays through Spotify's own embedded player, so the listener hears the full track when logged in to Spotify in that browser and a 30-second preview otherwise. Single tracks and podcast episodes are one row each; an album, playlist, podcast or artist link is also one row that plays through the whole collection, with the current item named in the Now Playing panel.
 - Standard playback controls: play/pause, previous/next, seek, volume, mute, shuffle, and three repeat modes (off, all, one). Tracks that fail to play are skipped with an explanation.
 - Remembers volume, shuffle, repeat mode, theme, last-played track, and every added upload or link between visits on the same browser.
 - Light and dark themes, keyboard shortcuts, and lock-screen / headset / media-key integration through the Media Session API.
@@ -97,7 +97,7 @@ Short-term, low-cost options that build on the existing design:
 - **Signed uploads and deletion.** A small serverless function holding the Cloudinary secret would allow per-user deletion, rate limiting, or a private upload passphrase, and could also fetch richer Spotify metadata (artist, album, duration).
 - **Move demo tracks to Cloudinary.** Removes 74 MB from the repository and gives the demo tracks the same transcoded MP3 delivery as uploads.
 - **Installable app.** A web app manifest and service worker would let listeners install Mixtape to their home screen and play repository tracks offline.
-- **Playlists and sharing.** Named playlists shared by URL; expanding a Spotify or SoundCloud album link into rows.
+- **Playlists and sharing.** Named Mixtape playlists shared by URL; expanding a Spotify or SoundCloud collection into individual rows (needs platform API access).
 
 Longer-term, if the project were to become a product rather than a personal site, the natural extensions are accounts with private libraries, multi-user curation, and a hosted "create your own Mixtape page" service. Each introduces infrastructure cost and content-moderation responsibilities that the current model mostly avoids.
 
