@@ -18,6 +18,8 @@ const dialogOpen = () => !!document.querySelector("dialog[open]");
 const setStatus = (el, msg, err = false) => { el.textContent = msg; el.classList.toggle("err", err); };
 
 let dragging = false, toastTimer, last = {};
+// Providers whose player must stay visible; they render inside the cover slot.
+const EMBEDDED = new Set(["youtube", "spotify"]);
 
 export function toast(msg) {
   const el = $("toast");
@@ -37,7 +39,8 @@ function renderTrack(t) {
   $("title").textContent = t ? t.title : "Nothing playing";
   $("artist").textContent = t ? t.artist : "Add files or paste a link to start";
   $("cover").style.setProperty("--h", t ? hue(t.id) : 220);
-  $("cover").dataset.embed = t?.provider === "youtube" ? "youtube" : "";
+  $("cover").dataset.embed = EMBEDDED.has(t?.provider) ? t.provider : "";
+  $("vol-hint").hidden = t?.provider !== "spotify";
   $("cover-letter").textContent = t ? [...(t.title || "?")][0].toUpperCase() : "♪";
   const img = $("cover-img");
   img.hidden = !t?.cover;
@@ -109,6 +112,7 @@ function render(s) {
   setPct(vol, +vol.value, 1);
   $("mute-icon").setAttribute("href", s.muted || s.volume === 0 ? "#i-mute" : "#i-vol");
   $("mute").setAttribute("aria-label", s.muted ? "Unmute" : "Mute");
+  $("preview-hint").hidden = !s.preview;
   if (s.error && s.error !== last.error) toast(s.error);
   last.error = s.error;
 }
@@ -269,7 +273,8 @@ async function checkLink() {
   img.hidden = !meta.cover;
   img.onerror = () => (img.hidden = true);
   if (meta.cover) img.src = meta.cover;
-  $("link-provider").textContent = `${urlTracks.PROVIDER_NAMES[p.provider]}${meta.duration ? ` · ${formatTime(meta.duration)}` : ""}`;
+  const note = p.provider === "spotify" ? " · 30 s preview unless you're logged in to Spotify in this browser" : "";
+  $("link-provider").textContent = `${urlTracks.PROVIDER_NAMES[p.provider]}${meta.duration ? ` · ${formatTime(meta.duration)}` : ""}${note}`;
   $("link-preview").hidden = false;
   setStatus(status, "");
   $("link-add").disabled = false;

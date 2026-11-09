@@ -50,13 +50,40 @@ test("unsupported platforms are named", () => {
     ["https://www.instagram.com/reel/abc/", "Instagram"],
     ["https://www.tiktok.com/@user/video/1", "TikTok"],
     ["https://x.com/user/status/1", "X"],
-    ["https://open.spotify.com/track/abc", "Spotify"],
+    ["https://spotify.link/abc123", "Spotify short"],
   ]) {
     const p = parse(u);
     assert.equal(p.error, "unsupported", u);
     assert.equal(p.platform, platform, u);
     assert.match(errorMessage(p), new RegExp(platform));
   }
+});
+
+test("Spotify track and episode links", () => {
+  const id = "4cOdK2wGLETKBW3PvgPWqT";
+  const expected = { provider: "spotify", kind: "track", externalId: `spotify:track:${id}`, canonicalUrl: `https://open.spotify.com/track/${id}`, id: `url-spotify-${id}` };
+  for (const u of [
+    `https://open.spotify.com/track/${id}`,
+    `https://open.spotify.com/track/${id}?si=abc&nd=1`,
+    `https://open.spotify.com/intl-de/track/${id}?si=abc`,
+    `https://open.spotify.com/intl-pt-br/track/${id}`,
+    `https://open.spotify.com/embed/track/${id}`,
+    `https://play.spotify.com/track/${id}`,
+    `open.spotify.com/track/${id}`,
+    `spotify:track:${id}`,
+  ]) assert.deepEqual(parse(u), expected, u);
+  const ep = parse("https://open.spotify.com/episode/7makk4oTQel546B0PZlDM5");
+  assert.equal(ep.kind, "episode");
+  assert.equal(ep.externalId, "spotify:episode:7makk4oTQel546B0PZlDM5");
+  assert.equal(parse("spotify:episode:7makk4oTQel546B0PZlDM5").id, ep.id);
+  for (const u of ["https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3", "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", "https://open.spotify.com/show/4rOoJ6Egrf8K2IrywzwOMk", "spotify:album:1DFixLWuPkv3KT3TnV35m3"]) {
+    assert.equal(parse(u).error, "playlist", u);
+  }
+  assert.equal(parse(`https://open.spotify.com/track/${id.slice(1)}`).error, "invalid", "21 chars");
+  assert.equal(parse(`https://open.spotify.com/track/${id}x`).error, "invalid", "23 chars");
+  assert.equal(parse("https://open.spotify.com/").error, "invalid");
+  assert.equal(parse("https://open.spotify.com/user/someone").error, "invalid");
+  assert.equal(parse("spotify:user:someone").error, "invalid");
 });
 
 test("direct media links", () => {

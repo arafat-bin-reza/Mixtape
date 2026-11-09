@@ -30,6 +30,29 @@ test("next moves the highlight", async ({ page }) => {
   await expect(page.locator("#tracks li").nth(1)).toHaveAttribute("aria-current", "true");
 });
 
+test("fits a narrow phone without horizontal scroll and keeps the cover wide enough for embeds", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/");
+  await expect(page.locator("#tracks li")).toHaveCount(repoCount);
+  const m = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    cover: document.getElementById("cover").getBoundingClientRect().width,
+    addLabelVisible: getComputedStyle(document.querySelector("#add span")).display !== "none",
+  }));
+  expect(m.scrollWidth).toBeLessThanOrEqual(320);
+  expect(m.cover).toBeGreaterThanOrEqual(280); // Spotify embed minimum rendered width
+  expect(m.addLabelVisible).toBe(false);
+  await expect(page.locator("#add")).toHaveAttribute("aria-label", "Add files");
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const wide = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    addLabelVisible: getComputedStyle(document.querySelector("#add span")).display !== "none",
+  }));
+  expect(wide.scrollWidth).toBeLessThanOrEqual(1280);
+  expect(wide.addLabelVisible).toBe(true);
+});
+
 test("shuffle and repeat toggle", async ({ page }) => {
   await page.goto("/");
   await page.click("#shuffle");

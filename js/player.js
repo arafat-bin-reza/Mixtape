@@ -5,8 +5,9 @@ import { createHtmlAudio } from "./engines/html-audio.js";
 import { createYouTube } from "./engines/youtube.js";
 import { createSoundCloud } from "./engines/soundcloud.js";
 import { createVimeo } from "./engines/vimeo.js";
+import { createSpotify } from "./engines/spotify.js";
 
-const factories = { youtube: createYouTube, soundcloud: createSoundCloud, vimeo: createVimeo };
+const factories = { youtube: createYouTube, soundcloud: createSoundCloud, vimeo: createVimeo, spotify: createSpotify };
 let engine = null, html = null, loadedId = null, container = null, callbacks = {};
 let applied = { volume: null, muted: null };
 
@@ -24,6 +25,7 @@ function make(factory) {
     onEnded: () => live() && callbacks.onEnded?.(),
     onError: (e) => live() && callbacks.onError?.(e),
     onBlocked: () => live() && setState({ playing: false }),
+    onPreview: (p) => live() && setState({ preview: !!p }),
   });
   return eng;
 }
@@ -56,7 +58,7 @@ function sync(s) {
   if (t.id !== loadedId) {
     loadedId = t.id;
     const eng = engineFor(t);
-    setState({ currentTime: 0, duration: t.duration || 0 });
+    setState({ currentTime: 0, duration: t.duration || 0, preview: false });
     applyVolume(getState());
     Promise.resolve()
       .then(() => eng.load(t, { autoplay: getState().playing }))

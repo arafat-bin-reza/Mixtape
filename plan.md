@@ -1,9 +1,12 @@
 # Plan: External Links as Audio, and Cloudinary Storage for Uploads
 
-This plan has two parts that share one playback path:
+This plan has three parts that share one playback path:
 
 - **Part A** (sections 1-10): paste a link to a video or audio hosted elsewhere and play it as an audio track.
-- **Part B** (sections 11-19): let a listener upload media to Cloudinary so it is stored in the cloud rather than only in their browser, and play it back through the same direct-URL path as Part A.
+- **Part B** (sections 11-20): let a listener upload media to Cloudinary so it is stored in the cloud rather than only in their browser, and play it back through the same direct-URL path as Part A.
+- **Part C** (sections 21-30): paste a Spotify track or episode link and play it through Spotify's official embedded player, as a fourth provider engine beside YouTube, SoundCloud and Vimeo.
+
+Part C adds `js/engines/spotify.js` and parser rules; it depends on Part A's engine layer and Add-link dialog, both already built.
 
 Uploads to Cloudinary produce ordinary `https://res.cloudinary.com/...` URLs, so Part B needs no new playback engine. It reuses Part A's `url-tracks` module and the `html-audio` engine. Build Part A steps 0-3 first; Part B depends on them.
 
@@ -403,3 +406,198 @@ Total: about 5 developer-days, on top of Part A steps 0-3.
 | Unsigned upload preset name | **Confirmed: `mixtape-unsigned`** (owner, 2026-11-08). | Yes |
 | Decision on the shared playlist | Enable "Resource list" or not | n/a |
 | API key and secret | Console > Settings > API keys | **No.** Only needed for section 17 work, kept in a serverless function's environment or a local `.env`. |
+
+---
+
+# Part C: Spotify Integration
+
+## 21. Goal
+
+Let a listener paste a Spotify track or podcast-episode link (or a `spotify:` URI) and have it appear in the playlist as a normal row: provider badge, title, artwork, remove button, persistence across reloads, and the same transport controls as every other track. Playback goes through Spotify's official **Embed iFrame API**, driven by a new `js/engines/spotify.js` that implements the existing engine interface. This revisits the note in section 7 ("Spotify could be added later via its embed") now that the engine layer, the Add-link dialog and the YouTube visible-player pattern exist; the incremental cost is small.
+
+## 22. Constraints That Shape the Design
+
+Spotify offers three browser-side integration routes. Only one fits a static GitHub Pages site with no owner-run backend.
+
+| Route | What it gives | Why it does or does not fit Mixtape |
+|---|---|---|
+| **Embed iFrame API** (`https://open.spotify.com/embed/iframe-api/v1`) | A visible Spotify player in an iframe with a JavaScript controller: `loadEntity/loadUri`, `play`, `pause`, `resume`, `togglePlay`, `seek(seconds)`, `destroy`, and events `ready`, `playback_started`, `playback_update` (`position`, `duration` in ms, `isPaused`, `isBuffering`, `playingURI`). No authentication, no app registration, no quota. Plays a **30-second preview** for visitors who are not logged in to Spotify in that browser, and the **full track** for visitors who are logged in (subject to Spotify's own rules). | **Chosen.** Same shape as the YouTube engine: a visible player in the cover slot plus event-driven time updates. Requires the iframe to be at least 280 px wide at its rendered size and to carry `allow="encrypted-media"` for full-length playback. No volume API. |
+| **Web Playback SDK** | Full-length, audio-only playback inside the page, with volume control, through a Spotify Connect device created in the browser. | Not feasible now. Requires a Spotify **Premium** listener, OAuth (PKCE is possible without a secret), a registered Spotify app whose redirect URI is the GitHub Pages URL, and Spotify's 2025 developer-platform rules: apps stay in **Development Mode** with a per-app cap of allow-listed users (reported as 25, reduced to 5 during 2025; confirm in the dashboard), and leaving it needs a registered business with 250,000 monthly active users. The SDK also must not be used in commercial projects without Spotify's written approval. Documented as a possible later tier only. |
+| **Web API** for metadata (artist, duration, album) | Clean metadata for the row. | Needs a token: either Client Credentials (secret, so a serverless function, like section 17) or a user login (Development Mode cap). Deferred. The oEmbed endpoint gives title and artwork without any token, which is enough for the row. |
+
+Other constraints:
+
+- **oEmbed has no artist field.** `https://open.spotify.com/oembed?url=...` returns `title`, `thumbnail_url` (300x300), `iframe_url`, `provider_name`. CORS is `*` (verified, section 30). The dialog will default the artist to "Spotify" and let the user edit it, exactly as it does for direct links.
+- **No `ended` event.** The controller only emits `playback_update`. Track end has to be inferred from the update stream (section 24.3).
+- **No volume or mute API.** Mixtape's volume slider cannot affect the embed. The engine treats `setVolume`/`setMuted` as no-ops and the UI shows a short hint while a Spotify track is current.
+- **Player must stay visible.** Spotify's embed terms, like YouTube's, forbid hiding or covering the player. It renders in the same `.cover` slot the YouTube engine uses, via `data-embed="spotify"`.
+- **Autoplay.** `play()` may be blocked until a user gesture (Safari especially). All Mixtape playback already starts from a click or key press; the embed's own Play button is also visible as a fallback.
+- **Short links** (`spotify.link/...`) need a server-side redirect follow; they are rejected with a message like the existing `on.soundcloud.com` case.
+- **Albums, playlists, shows** are collections. The embed can play them, but Mixtape's model is one row per track and the embed's internal next/previous would be invisible to the playlist. They return the existing `playlist` error for this iteration (section 28 lists the follow-up).
+
+## 23. User Experience
+
+- The **Add link** dialog accepts `open.spotify.com/track/<id>`, `open.spotify.com/intl-xx/track/<id>`, `open.spotify.com/episode/<id>`, and `spotify:track:<id>` / `spotify:episode:<id>` URIs. The provider line reads "Spotify". Title and artwork come from oEmbed; artist defaults to "Spotify" and is editable; duration is blank until the track first plays (the embed reports it).
+- The playlist row shows a **Spotify** badge and a remove button, like other URL tracks.
+- While a Spotify track is current, the cover slot shows the Spotify embed (its own artwork, title and Play button). On phones the cover is capped at 320 px, so the 280 px minimum is met; no layout change is needed.
+- The volume slider and **M** shortcut remain usable for other tracks but show a one-line hint under the slider: "Volume for Spotify is controlled in the Spotify player." Media Session still reports title/artist/artwork; its play/pause/seek actions map to the controller.
+- **Preview mode.** If the first `playback_update` reports a duration of about 30 s, the engine marks the row "Preview" and the Now Playing area shows "Log in to Spotify in this browser to hear the full track" with a link to `https://open.spotify.com/` (opens in a new tab). Mixtape cannot log the user in itself.
+- Failure cases (removed track, region block, private episode) arrive as a `playback_update` that never starts or as a `ready` that never fires. A 10 s load timeout marks the track failed and skips it through the existing `state.failed` flow.
+- Paste-to-add (Ctrl/Cmd+V) works unchanged because it already routes through `parse()`.
+
+## 24. Architecture Changes
+
+### 24.1 Parser (`js/url-tracks.js`)
+
+- Remove `"spotify.com": "Spotify"` from `UNSUPPORTED`; add `"spotify.link": "Spotify short"` so short links get the explicit "can't be played" message.
+- Accept hosts `open.spotify.com` and `play.spotify.com`, and the `spotify:` URI scheme (the existing `https://` prefixing already skips inputs that carry a scheme).
+- Path shapes: `/(intl-[a-z]{2}(-[A-Za-z]{2})?/)?(track|episode)/<id>` where `<id>` is base62, 22 characters (`/^[A-Za-z0-9]{22}$/`). `/album/`, `/playlist/`, `/show/`, `/artist/` return `{ error: "playlist" }`. Anything else under the host returns `invalid`.
+- Result: `{ provider: "spotify", kind: "track"|"episode", externalId: "spotify:track:<id>", canonicalUrl: "https://open.spotify.com/track/<id>", id: "url-spotify-<id>" }`. `externalId` is the URI because that is what `loadEntity` takes.
+- `PROVIDER_NAMES.spotify = "Spotify"`; `SUPPORTED_TEXT` becomes "Mixtape can play direct audio/video links, SoundCloud, YouTube, Vimeo and Spotify."
+- `OEMBED.spotify = (u) => "https://open.spotify.com/oembed?url=" + encodeURIComponent(u)`. `describe()` maps `title` and `thumbnail_url`; `author_name` is absent so artist falls back to "Spotify". No duration.
+
+### 24.2 Engine (`js/engines/spotify.js`)
+
+Follows `engines/youtube.js` closely.
+
+```
+API = "https://open.spotify.com/embed/iframe-api/v1"
+ready(): loadScript(API) once; resolve when window.onSpotifyIframeApiReady(IFrameAPI) fires (chain any previous handler, as the YouTube engine does).
+createSpotify({ container, handlers }):
+  el = <div> appended to container
+  controller created on first load(): api.createController(el, { width: "100%", height: 352, uri: track.externalId }, ctrl => { controller = ctrl; wire(); })
+  wire():
+    controller.addListener("ready", ...)            -> resolve load; cancel the 10 s watchdog
+    controller.addListener("playback_update", e => {
+        const { position, duration, isPaused, isBuffering, playingURI } = e.data;
+        if (duration) handlers.onDuration(duration / 1000);
+        handlers.onTime(position / 1000);
+        playing state machine (24.3)
+    })
+  load(track, { autoplay }): await init; first time: create controller with uri; later: controller.loadEntity(track.externalId); if (autoplay) controller.play()
+  play(): started ? controller.resume() : controller.play()
+  pause(): controller.pause()
+  seek(t): controller.seek(Math.round(t))        // integer seconds only
+  setVolume()/setMuted(): no-op (document why)
+  currentTime()/duration(): last values from playback_update
+  destroy(): controller.destroy(); el.remove(); destroyed = true
+```
+
+One controller is reused across consecutive Spotify tracks via `loadEntity`; `player.js` destroys it when the provider changes, exactly as for YouTube.
+
+`player.js` only needs `factories.spotify = createSpotify`. `providerOf()` already falls back to `direct` for unknown providers, so older persisted records are unaffected.
+
+### 24.3 Deriving play, pause and end from `playback_update`
+
+| Observation | Meaning | Handler |
+|---|---|---|
+| First update with `isPaused: false` after `load`/`play` | playback started | `onPlay()`; remember `started = true` |
+| `isPaused` flips false → true while `position > 0` and `position < duration - 1500` | user or app paused | `onPause()` |
+| `isPaused: true` and `position === 0` (or `position >= duration - 1500`) after the track had reached at least 50% | track ended (the embed rewinds to 0 and pauses) | `onEnded()` once; guard with a flag reset on the next `load` |
+| No `ready` and no update within 10 s of `load` | embed failed to load or the item is unavailable | `onError(new Error("Spotify player did not load"))` |
+| `duration` between 29 000 and 31 000 ms | preview mode | set `preview = true`; `ui.js` reads `state.preview` to show the login hint |
+
+Position updates arrive several times a second, so no polling timer is required (confirm cadence in Step 0).
+
+### 24.4 UI (`js/ui.js`, `index.html`, `css/style.css`)
+
+- `$("cover").dataset.embed` becomes `["youtube", "spotify"].includes(t?.provider) ? t.provider : ""`; CSS gets `.cover[data-embed=spotify]` rules mirroring the YouTube ones (transparent background instead of black, since the Spotify embed draws its own card).
+- Volume hint element under the slider, shown via `.player[data-provider=spotify]`.
+- Preview hint and login link in the Now Playing area, driven by a new `state.preview` boolean that `player.js` resets to `false` on every track change.
+- `index.html`: Add-link label and both meta descriptions list Spotify. The text badge is enough for the first pass; a sprite icon is optional.
+- README "Add link" paragraph: Spotify is supported; full tracks need a Spotify login in the browser, otherwise 30 s previews.
+
+### 24.5 Media Session
+
+No change. `media-session.js` already reads `state`; the Spotify engine supplies `onTime`/`onDuration` so position state keeps working. `setPositionState` must tolerate `duration` arriving after `currentTime` (already the case for YouTube).
+
+## 25. Implementation Steps
+
+| Step | Work | Files | Est. |
+|---|---|---|---|
+| 0 | **Spike (2 h).** In a scratch HTML page served by `scripts/serve.mjs`: load the iFrame API, create a controller for one track, confirm `playback_update` cadence, what the stream looks like at track end (position/isPaused), whether `seek` works while paused, whether `play()` after `loadEntity()` autoplays in Chrome and Safari, whether the generated iframe carries `encrypted-media`, and the duration reported when logged out (preview) versus logged in. Append findings to section 30. | scratch only | 0.25 d |
+| 1 | Parser: Spotify hosts, URI scheme, id regex, `intl-xx` prefix, collection → `playlist` error, `spotify.link` → unsupported. Unit tests in `tests/unit/url-parse.test.js` for each shape plus negatives. | `url-tracks.js`, tests | 0.5 d |
+| 2 | oEmbed describe for Spotify; artist fallback "Spotify"; provider name and supported text; dialog label and meta descriptions. | `url-tracks.js`, `index.html` | 0.25 d |
+| 3 | `engines/spotify.js` with lazy SDK load, controller reuse, state machine from 24.3, 10 s watchdog, no-op volume. Register in `player.js`. | `engines/spotify.js`, `player.js` | 1 d |
+| 4 | Cover slot embed display, volume hint, preview hint, `state.preview` plumbing. | `ui.js`, `style.css`, `index.html`, `player.js` | 0.5 d |
+| 5 | Playwright: route `https://open.spotify.com/embed/iframe-api/v1` to a stub script that calls `window.onSpotifyIframeApiReady` with a fake `IFrameAPI` whose controller records calls and lets the test emit `playback_update` events; route `https://open.spotify.com/oembed**` to a fixture. Assert row, badge, play/pause mapping, end-of-track advance, preview hint. | `tests/links.spec.js` (or `tests/spotify.spec.js`) | 0.75 d |
+| 6 | Manual pass: one real track and one episode in Chrome, Firefox, Safari desktop and Android Chrome, logged out and logged in; keyboard shortcuts; lock-screen controls. | checklist | 0.25 d |
+| 7 | Docs: README, CLAUDE.md engine list, `technical.md` stack row, section 30 findings. | docs | 0.25 d |
+
+Total: roughly 3.75 developer-days. Steps 1-2 alone make Spotify links recognised and described; Step 3 makes them play.
+
+## 26. Testing Strategy
+
+- **Unit (Node):** `parse()` table: `open.spotify.com/track/<id>`, `/intl-de/track/<id>?si=...`, `/episode/<id>`, `spotify:track:<id>`, `play.spotify.com/track/<id>`, 21- and 23-character ids (invalid), `/album/`, `/playlist/`, `/show/` (playlist error), `spotify.link/abc` (unsupported), `spotify.com/` root (invalid). Deterministic id equality for URL and URI forms of the same track.
+- **Browser (Playwright, no network):** stub the SDK script and oEmbed as in Step 5. Cases: add and persist; badge text; controller created with the URI; `#play` toggles via `resume`/`pause`; emitting an end-of-track update advances to the next row; a 30 s duration shows the preview hint; no `ready` within the (shortened for test) watchdog marks the row failed and skips.
+- **Manual:** real embeds cannot be automated reliably; keep the Step 6 checklist in this file and tick it before release.
+
+## 27. Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Logged-out visitors only hear 30 s previews and think the player is broken. | Detect preview duration, label the row "Preview", show the login hint with a link to open.spotify.com. Say so in README and the dialog's provider line. |
+| Spotify changes or removes the iFrame API. | Engine fails to `state.failed` through the 10 s watchdog; the SDK URL lives in one constant. Nothing else in the app depends on Spotify. |
+| Volume slider does nothing for Spotify and confuses users. | Hint text while a Spotify track is current. Do not try to emulate volume by muting the iframe; the embed exposes no such control and overlaying it would breach the terms. |
+| End-of-track inference misfires (double `onEnded`, or none). | One-shot flag reset on `load`; require the track to have reached 50% before accepting an end signal; cover both the rewind-to-zero and the position-near-duration patterns found in the spike. |
+| Embed terms: player hidden, resized below 280 px, or overlaid. | Reuse the YouTube visibility rule; cover slot is 320 px minimum on phones; no custom controls drawn over the iframe. |
+| Users paste album or playlist links expecting the whole thing. | Clear "Playlists aren't supported yet" message (already exists). Possible later feature: expand a collection into rows via the Web API, which needs a token (section 28). |
+| Third-party script and cookies from Spotify load when a Spotify track exists. | Lazy-load only when a Spotify track is first played, like the other SDKs. Mention Spotify in the README privacy note. |
+| Short links (`spotify.link`) cannot be resolved client-side. | Explicit message asking for the full `open.spotify.com` link (Share > Copy link on desktop). |
+
+## 28. Follow-up Options (Not in This Iteration)
+
+- **Metadata via the Web API.** A serverless function holding a Client Credentials token (same deployment model as section 17) could return artist, album, duration and a 640 px cover for a Spotify id, and expand album/playlist links into individual rows. Mixtape would call it through a `config.json` `spotifyMetadataUrl`. The Web API deprecations of November 2024 (no 30 s `preview_url` for new apps, no audio features) do not affect basic track lookup.
+- **Web Playback SDK tier.** Full-length audio-only playback with volume control for Premium listeners who log in with PKCE. Blocked today by Development Mode's user cap and the non-commercial clause; revisit if Spotify's quota policy changes. Would be a separate engine (`spotify-sdk`) chosen when a valid token is present, falling back to the embed engine otherwise.
+- **Collection rows.** Load an album or playlist into the embed as a single "collection" row that reports the currently playing item from `playingURI`. Cheap to build but breaks the one-row-one-track model, so it needs a UX decision first.
+- **"Open in Spotify" action** on the row and in Media Session, using `canonicalUrl`.
+
+## 29. Acceptance Criteria
+
+1. Pasting an `open.spotify.com` track or episode link, or a `spotify:` URI, adds one row with a Spotify badge, the oEmbed title and artwork, and an editable artist. Pasting the URL and URI of the same track produces one row.
+2. The row plays through the visible Spotify embed in the cover slot; play, pause, seek, next/previous, shuffle and repeat, keyboard shortcuts and Media Session actions all work. Position and duration update live.
+3. When the embed reaches the end of a track, the playlist advances exactly once.
+4. Logged-out playback shows the "Preview" label and the login hint; logged-in playback shows neither.
+5. Album, playlist, show and `spotify.link` links show explanatory messages and add nothing.
+6. A Spotify item that fails to load is skipped with the existing "can't be played" message within about 10 s.
+7. No Spotify script or cookie loads until a Spotify track is played.
+8. All existing unit and browser tests pass; new unit tests cover the parser shapes in section 26 and a stubbed browser test covers the engine mapping and end-of-track advance.
+
+## 30. Spike Findings (2026-11-09)
+
+**Status: implemented** (steps 1-5 and 7 of section 25 are done; the manual cross-browser pass in step 6 is still owed). Files: `js/engines/spotify.js`, `js/url-tracks.js`, `js/player.js`, `js/state.js`, `js/ui.js`, `index.html`, `css/style.css`, `tests/unit/url-parse.test.js`, `tests/links.spec.js`, `tests/smoke.spec.js`. The same change made the layout work down to a 320 px viewport (see "Responsive layout" below).
+
+**Live check against the real embed (headless Chromium, logged out, autoplay allowed):**
+
+| Check | Result |
+|---|---|
+| Script load and controller creation | `createController` called with `{ width: "100%", height: 352, uri }`; `ready` fired exactly once, after the controller callback. The API object exposes `createController` and `supportsVideo`. |
+| Generated iframe | `allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"`, `loading="lazy"`, src `open.spotify.com/embed/track/<id>?utm_source=iframe-api`. Rendered at 338 x 352 px in the desktop cover slot. The element passed to `createController` is replaced by the iframe, so the engine wraps it in its own `div.sp` and removes that on destroy. |
+| `playback_update` stream | First event has `playingURI: ""` and `duration: 0`; the second carries the real URI and duration. Then roughly **one event per second** (median gap 1064 ms), so the seek bar steps once a second while a Spotify track plays. Smoother motion would need client-side interpolation between events (not done). |
+| Preview mode | Logged-out duration was **29 713 ms**, inside the 29-31 s detection window; the "Preview only" hint appeared and `#dur` showed 0:29. The embed itself also labels the track "Preview". |
+| Autoplay after load | `controller.play()` after `ready` started playback without a gesture when Chromium allowed autoplay. Real browsers require the click that Mixtape already has. |
+| oEmbed | `title` and 300 px `thumbnail_url` returned; artist absent, so the row shows "Spotify" until edited. |
+
+Not yet verified live: the exact `playback_update` pattern at track end (the engine accepts both "rewound to 0 and paused" and "paused within 1.5 s of the end", each only after the track passed 50%), `seek()` while paused, switching between two Spotify tracks via `loadEntity`, Safari and Firefox, and a logged-in session. These are the step 6 manual checklist.
+
+**Implementation notes that differ from sections 24.2-24.3:**
+
+- The first `load()` resolves when the controller callback runs, not on `ready`; `ready` is awaited (capped at 3 s) only before the first `play()`. This avoids hanging if `ready` ever fires before a listener is attached. The 10 s watchdog covers script or controller failure.
+- Events whose `playingURI` is non-empty and differs from the current track are ignored, which keeps a stale update from the previous entity from flipping play state after `loadEntity`.
+- Preview state travels through a new optional engine handler `onPreview`, mirrored by `player.js` into `state.preview` and reset to `false` on every track change.
+
+**Responsive layout (same change):** the playlist row grid used `1fr` for the title column, whose automatic minimum is the unwrapped artist name; a long artist pushed the whole page 4 px wider than a 320 px phone. Fixed with `minmax(0,1fr)` and `min-width:0`, plus smaller paddings below 400 px so the cover slot stays at least 280 px wide (the Spotify minimum), icon-only header buttons below 480 px and in the tight two-column range 761-960 px, and a safe-area bottom inset. A smoke test now checks the 320 px viewport for overflow, cover width, and collapsed labels.
+
+**Desk check (before implementation):**
+
+| Check | Result |
+|---|---|
+| Spotify oEmbed (`open.spotify.com/oembed?url=...`) CORS | Allowed: `Access-Control-Allow-Origin: *`. Response fields: `title`, `thumbnail_url` (300x300), `thumbnail_width/height`, `iframe_url`, `html`, `provider_name`, `width`, `height`, `type: "rich"`. **No artist and no duration.** |
+| iFrame API script (`open.spotify.com/embed/iframe-api/v1`) | HTTP 200, `text/javascript`. Loaded with `<script async>`; signals readiness through the global `window.onSpotifyIframeApiReady(IFrameAPI)`. |
+| Controller surface (official reference) | `createController(element, { uri|url, width, height }, cb)`; methods `loadEntity(uriOrUrl, preferVideo?, startAt?)`, `loadUri`, `play`, `pause`, `resume`, `togglePlay`, `restart`, `seek(seconds)`, `destroy`; events `ready`, `playback_started`, `playback_update` with `position`/`duration` in ms, `isPaused`, `isBuffering`, `playingURI`. No volume method; no `ended` event. |
+| Minimum rendered width | 280 px (official tutorial). Mixtape's `.cover` is 320 px maximum on phones and larger on desktop, so the slot qualifies. |
+| Embed iframe attributes | oEmbed `html` uses `allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"`. The iFrame API creates its own iframe; confirm in Step 0 that it carries `encrypted-media`, which full-length playback needs. |
+| Preview versus full playback | Documented behaviour: 30 s preview unless the visitor is logged in to Spotify in that browser. Community reports show previews persisting for some logged-in users and in mobile-sized viewports; treat preview as a normal state, not an error. |
+| Web Playback SDK requirements | Premium account; Chrome, Firefox, Safari, Edge; iframes must allow `encrypted-media` and `autoplay`; non-commercial use only without written approval. Development Mode user cap and the 250,000 MAU extended-quota rule make it unsuitable for a public site; not pursued. |
+
+Of the items originally left for Step 0, cadence, iframe attributes, autoplay after the controller is ready, and preview duration are now verified above; end-of-track pattern, seek while paused, and `loadEntity` between two Spotify tracks remain manual.

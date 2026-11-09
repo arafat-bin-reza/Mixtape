@@ -33,7 +33,7 @@ input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;bac
 .btn.play{width:64px;height:64px;background:var(--accent);color:var(--on-accent)}
 .btn.play:hover{background:var(--accent);filter:brightness(1.1)}
 .btn.play .i{width:1.8rem;height:1.8rem}
-.btn.text{border-radius:22px;padding:0 16px 0 12px;background:var(--tint);color:var(--accent);font-weight:600}
+.btn.text{border-radius:22px;padding:0 16px 0 12px;background:var(--tint);color:var(--accent);font-weight:600;white-space:nowrap}
 .volume{display:flex;align-items:center;gap:8px}
 .list header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .list h2{margin:0;font-size:1.15rem}
@@ -42,7 +42,8 @@ ul{list-style:none;margin:0;padding:0}
 #tracks li{display:flex;align-items:center;border-top:1px solid var(--line);border-radius:10px}
 #tracks li[aria-current=true]{background:var(--tint);box-shadow:inset 4px 0 0 var(--accent)}
 #tracks li.bad{opacity:.5}
-.row{flex:1;min-width:0;display:grid;grid-template-columns:2rem 1fr auto;gap:8px;align-items:center;padding:10px 12px;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
+.row{flex:1;min-width:0;display:grid;grid-template-columns:2rem minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 12px;border:0;background:none;text-align:left;cursor:pointer;color:inherit}
+.row>span{min-width:0}
 .row .n{color:var(--muted);font-variant-numeric:tabular-nums}
 .row b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row small{display:block;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -55,13 +56,22 @@ li[aria-current=true] .row b,li[aria-current=true] .row .n{color:var(--accent)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #drop{position:fixed;inset:12px;display:grid;place-items:center;border:3px dashed var(--accent);border-radius:20px;background:color-mix(in srgb,var(--bg) 88%,transparent);font-size:1.3rem;font-weight:700;z-index:10}
 #drop[hidden]{display:none}
-@media (max-width:760px){.app{grid-template-columns:1fr;padding:12px}.player{position:static}.cover{max-width:320px;margin:0 auto}}
+.hint{margin:8px 0 0;font-size:.8rem;color:var(--muted)}
+.hint a{color:var(--accent)}
+@media (max-height:720px){.player{position:static}}
+@media (max-width:760px){.app{grid-template-columns:minmax(0,1fr);padding:12px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}.player{position:static}.cover{max-width:320px;margin:0 auto}}
+@media (max-width:400px){.app{padding:6px;padding-bottom:calc(6px + env(safe-area-inset-bottom));gap:12px}.player,.list{padding:12px;border-radius:16px}.cover{max-width:none}.title{font-size:1.4rem}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 .badge{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);background:var(--tint);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle;font-style:normal}
 .embed{position:absolute;inset:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
 .embed iframe{width:100%;height:100%;border:0;display:block}
 .cover[data-embed=youtube] .embed{width:100%;height:100%;opacity:1;pointer-events:auto;background:#000}
 .cover[data-embed=youtube] #cover-letter,.cover[data-embed=youtube] #cover-img{display:none}
+.embed .sp{width:100%;height:100%}
+.cover[data-embed=spotify]{aspect-ratio:auto;height:352px;background:transparent}
+.cover[data-embed=spotify] .embed{width:100%;height:100%;opacity:1;pointer-events:auto}
+.cover[data-embed=spotify] .embed iframe{width:100%!important;height:100%!important}
+.cover[data-embed=spotify] #cover-letter,.cover[data-embed=spotify] #cover-img{display:none}
 dialog{border:1px solid var(--line);border-radius:20px;background:var(--surface);color:var(--text);padding:24px;width:min(92vw,520px);max-height:90vh;box-sizing:border-box}
 dialog::backdrop{background:rgb(0 0 0/.55)}
 dialog h2{margin:0 0 12px;font-size:1.25rem}
@@ -87,4 +97,6 @@ dialog input:disabled{opacity:.6}
 .upload-list progress{width:100%;height:6px;margin-top:10px;accent-color:var(--accent)}
 .upload-list .keep{height:36px;margin-top:4px}
 .check{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text)}
-@media (max-width:480px){.preview{grid-template-columns:1fr}.upload-list .fields{grid-template-columns:1fr}.actions .btn.text span{display:none}}
+/* Icon-only header buttons where the playlist header is tight: narrow phones, and the two-column layout on tablets. */
+@media (max-width:480px),(min-width:761px) and (max-width:960px){.actions .btn.text span{display:none}.actions .btn.text{padding:0;width:44px;border-radius:50%}}
+@media (max-width:480px){.preview{grid-template-columns:1fr}.upload-list .fields{grid-template-columns:1fr}}

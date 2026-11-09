@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Music Player</title>
-<meta name="description" content="A simple browser music player with a playlist. Add your own audio files or paste links from SoundCloud, YouTube and Vimeo.">
+<meta name="description" content="A simple browser music player with a playlist. Add your own audio files or paste links from SoundCloud, YouTube, Vimeo and Spotify.">
 <meta name="theme-color" content="#2b50f0">
 <meta property="og:title" content="Music Player">
-<meta property="og:description" content="A simple browser music player with a playlist. Add your own audio files or paste links from SoundCloud, YouTube and Vimeo.">
+<meta property="og:description" content="A simple browser music player with a playlist. Add your own audio files or paste links from SoundCloud, YouTube, Vimeo and Spotify.">
 <meta property="og:type" content="website">
 <link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/style.css">
@@ -35,6 +35,7 @@
     <div class="meta">
       <p class="title" id="title">Nothing playing</p>
       <p class="artist" id="artist">Add files or paste a link to start</p>
+      <p class="hint" id="preview-hint" hidden>Preview only (30 s). <a href="https://open.spotify.com/" target="_blank" rel="noopener">Log in to Spotify</a> in this browser to hear the full track.</p>
     </div>
     <div class="seek">
       <input type="range" id="seek" min="0" max="0" step="0.1" value="0" aria-label="Seek">
@@ -51,14 +52,15 @@
       <button class="btn" id="mute" aria-label="Mute"><svg class="i"><use id="mute-icon" href="#i-vol"/></svg></button>
       <input type="range" id="volume" min="0" max="1" step="0.01" aria-label="Volume">
     </div>
+    <p class="hint" id="vol-hint" hidden>Volume for Spotify is controlled in the Spotify player.</p>
   </section>
 
   <section class="list" aria-label="Playlist">
     <header>
       <h2>Playlist</h2>
       <div class="actions">
-        <button class="btn text" id="add"><svg class="i"><use href="#i-plus"/></svg>Add files</button>
-        <button class="btn text" id="add-link"><svg class="i"><use href="#i-link"/></svg>Add link</button>
+        <button class="btn text" id="add" aria-label="Add files"><svg class="i"><use href="#i-plus"/></svg><span>Add files</span></button>
+        <button class="btn text" id="add-link" aria-label="Add link"><svg class="i"><use href="#i-link"/></svg><span>Add link</span></button>
         <button class="btn" id="theme" aria-label="Switch theme"><svg class="i"><use href="#i-theme"/></svg></button>
       </div>
     </header>
@@ -69,7 +71,7 @@
 <dialog id="link-dialog" aria-labelledby="link-heading">
   <form id="link-form" novalidate>
     <h2 id="link-heading">Add a link</h2>
-    <label for="link-url">Direct audio/video link, or a SoundCloud, YouTube or Vimeo link</label>
+    <label for="link-url">Direct audio/video link, or a SoundCloud, YouTube, Vimeo or Spotify link</label>
     <input id="link-url" type="url" placeholder="https://" autocomplete="off" spellcheck="false" inputmode="url">
     <p id="link-status" class="status" aria-live="polite"></p>
     <div id="link-preview" class="preview" hidden>

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
 const repoCount = JSON.parse(readFileSync("data/tracks.json", "utf8")).length;
-const TONE = "http://localhost:8000/tests/fixtures/tone.wav";
+const TONE = `http://localhost:${process.env.PORT || 8000}/tests/fixtures/tone.wav`;
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/config.json", (r) => r.fulfill({ json: {} }));
@@ -104,6 +104,72 @@ test("YouTube link uses oEmbed metadata and the stubbed player", async ({ page }
   await page.locator("#tracks li").first().locator(".row").click();
   await expect(page.locator("#cover")).toHaveAttribute("data-embed", "");
   await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+});
+
+test("Spotify link plays through the stubbed embed and reports preview, pause and end", async ({ page }) => {
+  await page.route("https://open.spotify.com/oembed**", (r) => r.fulfill({ json: { title: "Stub Song", thumbnail_url: `${TONE}#thumb`, provider_name: "Spotify" } }));
+  await page.route("https://noembed.com/**", (r) => r.fulfill({ json: {} }));
+  // Fake iFrame API: records controller calls and lets the test emit playback_update events.
+  await page.route("https://open.spotify.com/embed/iframe-api/v1", (r) => r.fulfill({ contentType: "text/javascript", body: `
+    window.__sp = { calls: [], listeners: {}, uri: null, dur: 213000 };
+    window.__sp.emit = (data) => (window.__sp.listeners.playback_update || []).forEach((fn) => fn({ data: { playingURI: window.__sp.uri, isBuffering: false, duration: window.__sp.dur, ...data } }));
+    const controller = {
+      addListener(ev, fn) { (window.__sp.listeners[ev] ??= []).push(fn); },
+      loadEntity(u) { window.__sp.calls.push(["load", u]); window.__sp.uri = u; },
+      play() { window.__sp.calls.push(["play"]); window.__sp.emit({ isPaused: false, position: 0 }); },
+      resume() { window.__sp.calls.push(["resume"]); window.__sp.emit({ isPaused: false, position: 5000 }); },
+      pause() { window.__sp.calls.push(["pause"]); window.__sp.emit({ isPaused: true, position: 5000 }); },
+      seek(s) { window.__sp.calls.push(["seek", s]); },
+      destroy() { window.__sp.calls.push(["destroy"]); },
+    };
+    const api = { createController(el, opts, cb) {
+      window.__sp.calls.push(["create", opts.uri]); window.__sp.uri = opts.uri;
+      const iframe = document.createElement("iframe"); el.replaceWith(iframe);
+      setTimeout(() => { cb(controller); (window.__sp.listeners.ready || []).forEach((fn) => fn()); }, 0);
+    } };
+    window.onSpotifyIframeApiReady?.(api);
+  ` }));
+
+  await page.goto("/");
+  await page.click("#add-link");
+  await page.fill("#link-url", "https://open.spotify.com/intl-de/track/4cOdK2wGLETKBW3PvgPWqT?si=share");
+  await expect(page.locator("#link-title-input")).toHaveValue("Stub Song");
+  await expect(page.locator("#link-artist")).toHaveValue("Spotify");
+  await expect(page.locator("#link-provider")).toContainText("Spotify");
+  await expect(page.locator("#link-provider")).toContainText("preview");
+  await page.click("#link-add");
+
+  const rows = page.locator("#tracks li");
+  const row = rows.last();
+  await expect(row.locator(".badge")).toHaveText("Spotify");
+  await row.locator(".row").click();
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+  await expect(page.locator("#cover")).toHaveAttribute("data-embed", "spotify");
+  await expect(page.locator("#vol-hint")).toBeVisible();
+  await expect(page.locator("#preview-hint")).toBeHidden();
+  await expect(page.locator("#dur")).toHaveText("3:33");
+  expect(await page.evaluate(() => window.__sp.calls.slice(0, 2))).toEqual([["create", "spotify:track:4cOdK2wGLETKBW3PvgPWqT"], ["play"]]);
+
+  await page.click("#play");
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Play");
+  expect(await page.evaluate(() => window.__sp.calls.at(-1))).toEqual(["pause"]);
+  await page.click("#play");
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+  expect(await page.evaluate(() => window.__sp.calls.at(-1))).toEqual(["resume"]);
+
+  // A 30 s duration means the visitor is not logged in: show the preview hint.
+  await page.evaluate(() => { window.__sp.dur = 30000; window.__sp.emit({ isPaused: false, position: 10000 }); });
+  await expect(page.locator("#preview-hint")).toBeVisible();
+  await expect(page.locator("#dur")).toHaveText("0:30");
+
+  // End of track: the embed rewinds to 0 and pauses. With repeat "all" the playlist advances once, to the first row.
+  await page.click("#repeat");
+  await page.evaluate(() => { window.__sp.emit({ isPaused: false, position: 29000 }); window.__sp.emit({ isPaused: true, position: 0 }); });
+  await expect(rows.first()).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#cover")).toHaveAttribute("data-embed", "");
+  await expect(page.locator("#preview-hint")).toBeHidden();
+  await expect(page.locator("#vol-hint")).toBeHidden();
+  expect(await page.evaluate(() => window.__sp.calls.at(-1))).toEqual(["destroy"]);
 });
 
 test("pasting a link on the page opens the dialog pre-filled", async ({ page }) => {

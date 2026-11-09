@@ -1,18 +1,30 @@
-// Tracks that live at a URL: direct media links, SoundCloud / YouTube / Vimeo links, and Cloudinary uploads.
+// Tracks that live at a URL: direct media links, SoundCloud / YouTube / Vimeo / Spotify links, and Cloudinary uploads.
 // parse() and the record helpers have no DOM dependency so they can be unit-tested in Node.
 import { tx, STORES } from "./db.js";
 import { probe } from "./probe.js";
 
 export const MEDIA_EXT = /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|webm|mov)$/i;
-export const SUPPORTED_TEXT = "Mixtape can play direct audio/video links, SoundCloud, YouTube and Vimeo.";
-export const PROVIDER_NAMES = { youtube: "YouTube", soundcloud: "SoundCloud", vimeo: "Vimeo", cloudinary: "Cloud", direct: "Link" };
+export const SUPPORTED_TEXT = "Mixtape can play direct audio/video links, SoundCloud, YouTube, Vimeo and Spotify.";
+export const PROVIDER_NAMES = { youtube: "YouTube", soundcloud: "SoundCloud", vimeo: "Vimeo", spotify: "Spotify", cloudinary: "Cloud", direct: "Link" };
 
 const UNSUPPORTED = {
   "facebook.com": "Facebook", "fb.watch": "Facebook", "fb.com": "Facebook", "instagram.com": "Instagram", "tiktok.com": "TikTok",
-  "twitter.com": "X", "x.com": "X", "spotify.com": "Spotify", "apple.com": "Apple Music", "on.soundcloud.com": "SoundCloud short",
+  "twitter.com": "X", "x.com": "X", "apple.com": "Apple Music", "on.soundcloud.com": "SoundCloud short", "spotify.link": "Spotify short",
 };
 const SC_RESERVED = new Set(["discover", "search", "stream", "you", "upload", "pages", "charts", "tags", "terms-of-use", "people", "popular", "mobile"]);
 const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+const SP_ID = /^[A-Za-z0-9]{22}$/;
+const SP_SINGLE = new Set(["track", "episode"]);
+const SP_COLLECTION = new Set(["album", "playlist", "show", "artist"]);
+const SP_URI = /^spotify:([a-z]+):([A-Za-z0-9]+)$/i;
+const SP_PATH = /^\/(?:intl-[a-z]{2}(?:-[a-z]{2})?\/)?(?:embed\/)?([a-z]+)\/([A-Za-z0-9]+)/i;
+
+function spotify(kind, id) {
+  kind = kind.toLowerCase();
+  if (SP_COLLECTION.has(kind)) return { error: "playlist" };
+  if (!SP_SINGLE.has(kind) || !SP_ID.test(id)) return { error: "invalid" };
+  return { provider: "spotify", kind, externalId: `spotify:${kind}:${id}`, canonicalUrl: `https://open.spotify.com/${kind}/${id}`, id: `url-spotify-${id}` };
+}
 
 const host = (u) => u.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
 export const hash = (s) => { let h = 5381; for (const c of String(s)) h = (Math.imul(h, 33) + c.codePointAt(0)) >>> 0; return h.toString(36); };
@@ -24,6 +36,8 @@ export const hash = (s) => { let h = 5381; for (const c of String(s)) h = (Math.
 export function parse(input) {
   let s = String(input ?? "").trim();
   if (!s) return { error: "empty" };
+  const spUri = SP_URI.exec(s);
+  if (spUri) return spotify(spUri[1], spUri[2]);
   if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = "https://" + s;
   let u;
   try { u = new URL(s); } catch { return { error: "invalid" }; }
@@ -65,6 +79,12 @@ export function parse(input) {
     return { provider: "vimeo", externalId: m[1], hash: vh, canonicalUrl: `https://vimeo.com/${m[1]}${vh ? "/" + vh : ""}`, id: `url-vimeo-${m[1]}` };
   }
 
+  // Spotify (tracks and podcast episodes; albums, playlists and shows are collections)
+  if (h === "open.spotify.com" || h === "play.spotify.com" || h === "spotify.com") {
+    const m = SP_PATH.exec(u.pathname);
+    return m ? spotify(m[1], m[2]) : { error: "invalid" };
+  }
+
   // Anything else: treat as a direct media link.
   u.hash = "";
   return { provider: "direct", externalId: u.href, canonicalUrl: u.href, id: `url-direct-${hash(u.href)}`, known: MEDIA_EXT.test(u.pathname) };
@@ -83,6 +103,7 @@ const OEMBED = {
   youtube: (u) => `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(u)}`,
   soundcloud: (u) => `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(u)}`,
   vimeo: (u) => `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(u)}`,
+  spotify: (u) => `https://open.spotify.com/oembed?url=${encodeURIComponent(u)}`, // title + thumbnail only; no artist or duration
 };
 
 async function getJson(url, ms = 6000) {

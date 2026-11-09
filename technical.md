@@ -7,7 +7,7 @@
 | Markup | HTML5 | Single page, `index.html`. Inline SVG sprite for icons. |
 | Styling | Plain CSS, custom properties | `css/style.css` (59 lines). Light/dark via `prefers-color-scheme` and a `data-theme` override on `<html>`. |
 | Application logic | Vanilla JavaScript, ES modules | Modules under `js/` plus pluggable playback engines in `js/engines/`. Uses top-level `await`. No framework, no bundler, no transpiler. |
-| Audio playback | HTML `<audio>` element, YouTube IFrame API, SoundCloud Widget API, Vimeo Player SDK | `js/player.js` picks an engine per track; provider SDKs load lazily. |
+| Audio playback | HTML `<audio>` element, YouTube IFrame API, SoundCloud Widget API, Vimeo Player SDK, Spotify Embed iFrame API | `js/player.js` picks an engine per track; provider SDKs load lazily. Spotify plays 30 s previews unless the visitor is logged in to Spotify, and exposes no volume control. |
 | Persistence | IndexedDB | Database `music-player` v2: `local-tracks` (device-only Blobs) and `url-tracks` (links and Cloudinary uploads). |
 | Cloud storage | Cloudinary (unsigned upload preset) | `js/cloud-upload.js`; audio/video delivered as MP3 from `res.cloudinary.com`. Config in `config.json`. |
 | Settings persistence | `localStorage` | Keys prefixed `music-player:`. |
