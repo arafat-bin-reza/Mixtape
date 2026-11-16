@@ -11,6 +11,7 @@
   "audit": {
     "endpoint": "https://mixtape-audit.mixtape-audit-collector.workers.dev/v1/events",
     "flushSeconds": 15,
-    "retentionDays": 365
+    "retentionDays": 365,
+    "notice": false
   }
 }

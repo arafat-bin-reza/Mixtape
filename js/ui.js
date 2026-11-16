@@ -349,7 +349,8 @@ export function initUI({ onPrev, onNext }) {
   };
   $("privacy-link").onclick = openPrivacy;
   $("privacy-close").onclick = () => $("privacy-dialog").close();
-  $("audit-notice").hidden = !audit.isEnabled() || storage.load("audit-notice", false);
+  // config.json can switch the notice off with audit.notice: false; logging and the Privacy panel are unaffected.
+  $("audit-notice").hidden = !audit.isEnabled() || audit.config().notice === false || storage.load("audit-notice", false);
   $("audit-notice-more").onclick = openPrivacy;
   $("audit-notice-ok").onclick = () => { $("audit-notice").hidden = true; storage.save("audit-notice", true); };
 

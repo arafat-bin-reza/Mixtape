@@ -42,6 +42,16 @@ test("opening the app posts session_start and shows a dismissible notice", async
   await expect(page.locator("#audit-notice")).toBeHidden();
 });
 
+test("audit.notice: false hides the notice but keeps logging and the Privacy panel", async ({ page }) => {
+  const events = await collect(page);
+  await page.route("**/config.json", (r) => r.fulfill({ json: { audit: { endpoint: ENDPOINT, flushSeconds: 1, notice: false } } }));
+  await page.goto("/");
+  await expect.poll(() => ofType(events, "session_start").length).toBe(1);
+  await expect(page.locator("#audit-notice")).toBeHidden();
+  await page.click("#privacy-link");
+  await expect(page.locator("#privacy-audit")).toBeVisible();
+});
+
 test("adding a link and playing it to the end is logged", async ({ page }) => {
   const events = await collect(page);
   await page.goto("/");
