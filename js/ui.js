@@ -348,6 +348,8 @@ export function initUI({ onPrev, onNext }) {
     $("privacy-dialog").showModal();
   };
   $("privacy-link").onclick = openPrivacy;
+  // audit.privacyLink: false hides the footer link; the panel stays reachable from the notice when that is shown.
+  $("privacy-link").hidden = audit.isEnabled() && audit.config().privacyLink === false;
   $("privacy-close").onclick = () => $("privacy-dialog").close();
   // config.json can switch the notice off with audit.notice: false; logging and the Privacy panel are unaffected.
   $("audit-notice").hidden = !audit.isEnabled() || audit.config().notice === false || storage.load("audit-notice", false);

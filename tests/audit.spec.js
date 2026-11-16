@@ -52,6 +52,16 @@ test("audit.notice: false hides the notice but keeps logging and the Privacy pan
   await expect(page.locator("#privacy-audit")).toBeVisible();
 });
 
+test("audit.privacyLink: false hides the Privacy link but keeps logging", async ({ page }) => {
+  const events = await collect(page);
+  await page.route("**/config.json", (r) => r.fulfill({ json: { audit: { endpoint: ENDPOINT, flushSeconds: 1, privacyLink: false } } }));
+  await page.goto("/");
+  await expect.poll(() => ofType(events, "session_start").length).toBe(1);
+  await expect(page.locator("#privacy-link")).toBeHidden();
+  await page.click("#audit-notice-more");
+  await expect(page.locator("#privacy-audit")).toBeVisible();
+});
+
 test("adding a link and playing it to the end is logged", async ({ page }) => {
   const events = await collect(page);
   await page.goto("/");
