@@ -46,6 +46,38 @@ test("direct media link is added, persists, plays, and is not duplicated", async
   await expect(page.locator("#tracks li")).toHaveCount(repoCount);
 });
 
+test("the dialog is empty after a link is added and after Cancel", async ({ page }) => {
+  await page.goto("/");
+  const empty = async () => {
+    await expect(page.locator("#link-dialog")).not.toHaveAttribute("open", "");
+    for (const id of ["#link-url", "#link-title-input", "#link-artist"]) await expect(page.locator(id)).toHaveValue("");
+    await expect(page.locator("#link-provider")).toHaveText("");
+    await expect(page.locator("#link-cover")).not.toHaveAttribute("src", /./);
+  };
+
+  await page.click("#add-link");
+  await page.fill("#link-url", TONE);
+  await expect(page.locator("#link-add")).toBeEnabled();
+  await page.fill("#link-artist", "Test Artist");
+  await page.click("#link-add");
+  await expect(page.locator("#tracks li")).toHaveCount(repoCount + 1);
+  await empty();
+
+  await page.click("#add-link");
+  await expect(page.locator("#link-url")).toHaveValue("");
+  await expect(page.locator("#link-preview")).toBeHidden();
+  await expect(page.locator("#link-status")).toHaveText("");
+  await expect(page.locator("#link-add")).toBeDisabled();
+
+  // Cancel clears too, including a lookup still waiting on the input debounce.
+  await page.fill("#link-url", `${TONE}?v=2`);
+  await page.click("#link-cancel");
+  await empty();
+  await page.waitForTimeout(600);
+  await expect(page.locator("#link-add")).toBeDisabled();
+  await empty();
+});
+
 test("unsupported platform links are rejected with an explanation", async ({ page }) => {
   await page.goto("/");
   await page.click("#add-link");

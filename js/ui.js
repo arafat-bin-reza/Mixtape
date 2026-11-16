@@ -253,13 +253,25 @@ async function runUploads() {
 
 // ---------- Adding links ----------
 
-let linkSeq = 0, linkPending = null;
+let linkSeq = 0, linkPending = null, linkTimer;
 
 function resetLink() {
   linkPending = null;
   $("link-add").disabled = true;
   $("link-preview").hidden = true;
   setStatus($("link-status"), "");
+}
+
+/** Empties every field of the dialog. Runs on close, so an add, Cancel and Esc all leave nothing behind. */
+function clearLinkForm() {
+  clearTimeout(linkTimer); // a pending lookup must not refill the closed dialog
+  linkSeq++;
+  $("link-form").reset();
+  const img = $("link-cover");
+  img.hidden = true;
+  img.removeAttribute("src");
+  $("link-provider").textContent = "";
+  resetLink();
 }
 
 function openLinkDialog(prefill = "") {
@@ -357,12 +369,11 @@ export function initUI({ onPrev, onNext }) {
   $("audit-notice-ok").onclick = () => { $("audit-notice").hidden = true; storage.save("audit-notice", true); };
 
   // Link dialog
-  let linkTimer;
   $("add-link").onclick = () => openLinkDialog();
   $("link-url").addEventListener("input", () => { clearTimeout(linkTimer); linkTimer = setTimeout(checkLink, 400); });
   $("link-form").onsubmit = (e) => { e.preventDefault(); submitLink(); };
   $("link-cancel").onclick = () => $("link-dialog").close();
-  $("link-dialog").addEventListener("close", () => { linkSeq++; resetLink(); });
+  $("link-dialog").addEventListener("close", clearLinkForm);
 
   // Upload dialog
   $("upload-form").onsubmit = (e) => {

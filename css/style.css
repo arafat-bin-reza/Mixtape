@@ -2,6 +2,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e1017;--surface:#171a24;--text:#eceef5;--muted:#9299ae;--accent:#8aa0ff;--on-accent:#0e1017;--line:#2a2f3f;--tint:#1f2640;color-scheme:dark}}
 :root[data-theme=dark]{--bg:#0e1017;--surface:#171a24;--text:#eceef5;--muted:#9299ae;--accent:#8aa0ff;--on-accent:#0e1017;--line:#2a2f3f;--tint:#1f2640;color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 "Avenir Next","Segoe UI Variable","Segoe UI",system-ui,sans-serif}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 button,input{font:inherit;color:inherit}
