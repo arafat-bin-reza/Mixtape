@@ -53,7 +53,6 @@ test("adding a link and playing it to the end is logged", async ({ page }) => {
   await expect.poll(() => ofType(events, "track_add").length).toBe(1);
   const [add] = ofType(events, "track_add");
   expect(add).toMatchObject({ source: "url", provider: "direct", url: TONE, title: "tone", duration: 2 });
-  expect(add.existing).toBeUndefined();
 
   await page.locator("#tracks li").last().locator(".row").click();
   await expect.poll(() => ofType(events, "play_end").length, { timeout: 15000 }).toBe(1);
@@ -64,10 +63,12 @@ test("adding a link and playing it to the end is logged", async ({ page }) => {
   expect(end.listenedSec).toBeGreaterThan(1);
   expect(end.listenedSec).toBeLessThan(5);
 
-  // Already reported: the next visit does not report the same link again.
+  // The next visit carries the link in its library snapshot and does not report it as newly added.
+  expect(ofType(events, "session_start")[0].library).toEqual([]);
   await page.reload();
   await expect.poll(() => ofType(events, "session_start").length).toBe(2);
   expect(ofType(events, "session_start")[1].personal).toBe(1);
+  expect(ofType(events, "session_start")[1].library).toMatchObject([{ trackId: add.trackId, url: TONE, title: "tone" }]);
   await page.locator("#tracks li").last().locator(".rm").click();
   await expect.poll(() => ofType(events, "track_remove").length).toBe(1);
   expect(ofType(events, "track_add")).toHaveLength(1);

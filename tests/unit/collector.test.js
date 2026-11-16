@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clean, parseBatch, parseUA, toCsv, MAX_EVENTS } from "../../collector/src/lib.js";
+import { clean, parseBatch, parseUA, toCsv, MAX_EVENTS, MAX_LIBRARY } from "../../collector/src/lib.js";
 
 const ev = (over) => ({ sessionId: "session-0001", seq: 1, ts: 1000, type: "track_add", trackId: "url-youtube-abc", ...over });
 
@@ -21,6 +21,13 @@ test("clean rejects malformed events", () => {
   assert.equal(clean(ev({ trackId: undefined })), null);
   assert.equal(clean(null), null);
   assert.ok(clean({ sessionId: "session-0001", seq: 0, ts: 1, type: "session_start" })); // no trackId needed
+});
+
+test("clean validates the library snapshot track by track", () => {
+  const start = (library) => clean({ sessionId: "session-0001", seq: 0, ts: 1, type: "session_start", library }).fields.library;
+  assert.deepEqual(start([{ trackId: "url-youtube-abc", title: "T", bogus: 1 }, { title: "no id" }, null, "x"]), [{ trackId: "url-youtube-abc", title: "T" }]);
+  assert.equal(start(Array(MAX_LIBRARY + 20).fill({ trackId: "local-1" })).length, MAX_LIBRARY);
+  assert.equal(start("nope"), undefined);
 });
 
 test("parseBatch validates the envelope and drops bad events", () => {

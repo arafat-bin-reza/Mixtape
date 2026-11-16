@@ -39,7 +39,7 @@ If you believe something uploaded here infringes your rights, open an issue on t
 - **Deletion.** Open an issue on this repository and quote the visitor id from the Privacy panel; the owner removes that visitor's records.
 - **Other services.** Uploaded files are stored by Cloudinary and can be played by anyone who has the URL. YouTube, SoundCloud, Vimeo and Spotify players load from those services under their own policies. Settings and the personal playlist stay in the browser.
 
-To run a fork without the usage log, leave `audit.endpoint` empty. Collector deployment and the queries for reading the log are in `collector/README.md`.
+To run a fork without the usage log, leave `audit.endpoint` empty. Collector deployment, the owner's admin page and the queries for reading the log are in `collector/README.md`.
 
 ## Keyboard shortcuts
 

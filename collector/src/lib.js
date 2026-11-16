@@ -11,14 +11,25 @@ const TRACK = {
   trackId: TID, source: S(16), provider: S(16), kind: S(16), url: S(2000), externalId: S(300), title: S(300), artist: S(300),
   duration: N, cover: S(2000), fileName: S(300), bytes: N, mime: S(100), shared: B,
 };
+export const MAX_LIBRARY = 150;
+const shape = (spec, e) => {
+  const out = {};
+  for (const [k, fn] of Object.entries(spec)) {
+    const v = fn(e[k]);
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+};
+/** The library snapshot in session_start: the personal tracks already in the visitor's browser. */
+const LIBRARY = (v) => (Array.isArray(v) ? v.slice(0, MAX_LIBRARY).filter((t) => t && typeof t === "object").map((t) => shape(TRACK, t)).filter((t) => t.trackId) : undefined);
 const SHAPES = {
   session_start: {
     userAgent: S(500), platform: S(50), platformVersion: S(50), model: S(100), mobile: B, brands: S(300), screen: S(40), viewport: S(40),
-    language: S(35), timeZone: S(64), referrer: S(500), standalone: B, repo: N, shared: N, personal: N,
+    language: S(35), timeZone: S(64), referrer: S(500), standalone: B, repo: N, shared: N, personal: N, library: LIBRARY, libraryTruncated: B,
   },
-  track_add: { ...TRACK, existing: B },
+  track_add: TRACK,
   track_remove: { trackId: TID },
-  play_start: { ...TRACK, shuffle: B, repeat: S(8) },
+  play_start: { ...TRACK, preview: B, shuffle: B, repeat: S(8) },
   play_end: { trackId: TID, listenedSec: N, positionSec: N, durationSec: N, reason: S(16), preview: B },
   collection_item: { trackId: TID, itemUri: S(200), title: S(300) },
   play_error: { trackId: TID, url: S(2000), message: S(500) },
@@ -26,13 +37,9 @@ const SHAPES = {
 
 /** Validates one event and returns it with only known, length-limited fields, or null. */
 export function clean(e) {
-  const shape = e && typeof e === "object" && Object.hasOwn(SHAPES, e.type) ? SHAPES[e.type] : null;
-  if (!shape || !ID.test(e.sessionId) || !Number.isInteger(e.seq) || e.seq < 0 || N(e.ts) === undefined) return null;
-  const fields = {};
-  for (const [k, fn] of Object.entries(shape)) {
-    const v = fn(e[k]);
-    if (v !== undefined) fields[k] = v;
-  }
+  const spec = e && typeof e === "object" && Object.hasOwn(SHAPES, e.type) ? SHAPES[e.type] : null;
+  if (!spec || !ID.test(e.sessionId) || !Number.isInteger(e.seq) || e.seq < 0 || N(e.ts) === undefined) return null;
+  const fields = shape(spec, e);
   if (e.type !== "session_start" && !fields.trackId) return null;
   return { sessionId: e.sessionId, seq: e.seq, ts: e.ts, type: e.type, fields };
 }

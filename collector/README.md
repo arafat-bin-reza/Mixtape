@@ -5,6 +5,7 @@ It has its own `package.json`; nothing here is loaded by the site.
 
 - `POST /v1/events` is public. It accepts batches only from the origins in `ALLOWED_ORIGINS`, validates and truncates every field, rate-limits per IP, and records the sender's IP and Cloudflare location itself.
 - `/v1/admin/*` needs `Authorization: Bearer <ADMIN_TOKEN>`. The token is a Worker secret and is never written to this repository.
+- `GET /v1/admin/` is a read-only admin page. The page itself contains no data: it asks for the admin token, keeps it for the browser tab only, and shows the views below as tables with CSV download.
 - A daily cron deletes sessions and events older than `RETENTION_DAYS` and clears the IP and visitor id on catalogue rows of that age.
 
 ## Deploy
@@ -34,6 +35,10 @@ Requests from `http://localhost:8000` are accepted, so `npm run serve` in the re
 
 ## Read the log
 
+In a browser, open `https://mixtape-audit.<subdomain>.workers.dev/v1/admin/` and paste the admin token. The tabs are: Visitors, Activity of one IP or visitor, Links added, Most played, and Who played a track. Clicking an IP address, visitor id or track id opens the matching view for it. For stronger protection, put Cloudflare Access in front of `/v1/admin/*` in the Zero Trust dashboard; the token is still required.
+
+From a terminal:
+
 ```bash
 TOKEN=...   # the ADMIN_TOKEN value
 BASE=https://mixtape-audit.<subdomain>.workers.dev/v1/admin
@@ -44,9 +49,16 @@ curl -H "Authorization: Bearer $TOKEN" "$BASE/events?visitor=<visitor id>&format
 curl -H "Authorization: Bearer $TOKEN" "$BASE/events?track=<track id>&type=play_start"
 curl -H "Authorization: Bearer $TOKEN" "$BASE/tracks?format=csv" -o tracks.csv
 curl -X DELETE -H "Authorization: Bearer $TOKEN" "$BASE/visitors/<visitor id>"    # erasure request
+
+# The admin page's views, as JSON or CSV
+curl -H "Authorization: Bearer $TOKEN" "$BASE/report/visitors?from=2026-11-01&to=2026-11-30&format=csv"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/report/activity?ip=203.0.113.7"          # needs ip or visitor
+curl -H "Authorization: Bearer $TOKEN" "$BASE/report/links?format=csv"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/report/top"
+curl -H "Authorization: Bearer $TOKEN" "$BASE/report/plays?track=<track id>"           # needs track
 ```
 
-Filters: `from`, `to` (date or milliseconds), `ip`, `visitor`, `limit` (default 500, max 5000) everywhere; `track`, `session`, `type` on events; `track`, `provider` on tracks. Every `*_at` column has a readable `*_utc` twin.
+Filters: `from`, `to` (date or milliseconds; a bare `to` date includes that whole day), `ip`, `visitor`, `limit` (default 500, max 5000) everywhere; `track`, `session`, `type` on events; `track`, `provider` on tracks. Every `*_at` column has a readable `*_utc` twin.
 
 ## Saved queries
 

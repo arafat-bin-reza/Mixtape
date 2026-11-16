@@ -5,7 +5,10 @@ import { getState, subscribe } from "./state.js";
 import * as storage from "./storage.js";
 import { describeItem } from "./url-tracks.js";
 
-const MAX_QUEUE = 200, BATCH = 20, MAX_EVENTS = 50, MAX_BYTES = 48000, MAX_SEEN = 500;
+// The collector accepts 64 KB and 50 events per request and 150 library tracks; sizes are UTF-8 bytes, not characters.
+const MAX_QUEUE = 200, BATCH = 20, MAX_EVENTS = 50, MAX_BYTES = 48000, MAX_LIBRARY = 150, LIBRARY_BYTES = 40000;
+const encoder = new TextEncoder();
+const bytes = (v) => encoder.encode(JSON.stringify(v)).length;
 let cfg = null, visitor = null, session = null, seq = 0;
 let queue = [], stored = false, sending = false, healthy = true;
 let prev = null, tracksRef = null, failedRef = null;
@@ -72,7 +75,7 @@ function take() {
   const batch = [];
   let size = 0;
   for (const e of queue) {
-    size += JSON.stringify(e).length;
+    size += bytes(e);
     if (batch.length && (batch.length >= MAX_EVENTS || size > MAX_BYTES)) break;
     batch.push(e);
   }
@@ -124,11 +127,6 @@ function endPlay(trackId, reason) {
   clock.total = 0;
 }
 
-function markSeen(ids) {
-  const seen = storage.load("audit-seen", []);
-  storage.save("audit-seen", [...new Set([...seen, ...ids])].slice(-MAX_SEEN));
-}
-
 function onState(s) {
   try {
     const cur = s.tracks[s.order[s.position]];
@@ -145,15 +143,14 @@ function onState(s) {
     const nearEnd = dur > 0 && pos >= dur - Math.min(2, dur * 0.1);
     const { events, started } = diff({ ...prev, nearEnd }, next);
     const find = (id) => s.tracks.find((t) => t.id === id);
-    const added = [];
     for (const e of events) {
       const t = find(e.trackId);
       switch (e.type) {
-        case "track_add": if (t && isPersonal(t)) { emit("track_add", describe(t)); added.push(t.id); } break;
+        case "track_add": if (t && isPersonal(t)) emit("track_add", describe(t)); break;
         case "track_remove": emit("track_remove", { trackId: e.trackId }); break;
         case "play_error": emit("play_error", { trackId: e.trackId, url: t && describe(t).url, message: s.error || undefined }); break;
         case "play_end": endPlay(e.trackId, e.reason); break;
-        case "play_start": if (t) emit("play_start", { ...describe(t), shuffle: s.shuffle, repeat: s.repeat }); break;
+        case "play_start": if (t) emit("play_start", { ...describe(t), preview: s.preview, shuffle: s.shuffle, repeat: s.repeat }); break;
         case "collection_item": {
           const n = ++seq; // reserve the slot now; the title arrives from oEmbed
           describeItem(e.itemUri).then((m) => emit("collection_item", { trackId: e.trackId, itemUri: e.itemUri, title: m.title || undefined }, n));
@@ -161,7 +158,6 @@ function onState(s) {
         }
       }
     }
-    if (added.length) markSeen(added);
     if (next.currentId !== prev.currentId) { pos = 0; dur = 0; preview = false; clock.total = 0; }
     prev = { ...next, started };
     tracksRef = s.tracks; failedRef = s.failed;
@@ -194,7 +190,7 @@ async function clientHints() {
   } catch { return {}; }
 }
 
-/** Call once, after the playlist is built. Sends session_start, reports personal tracks not yet reported, then watches state. */
+/** Call once, after the playlist is built. Sends session_start with the library snapshot, then watches state. */
 export async function start() {
   if (!cfg || prev) return;
   try {
@@ -202,18 +198,24 @@ export async function start() {
     const s = getState();
     const count = (src) => s.tracks.filter((t) => t.source === src).length;
     const personal = s.tracks.filter(isPersonal);
+    // Library snapshot: the personal tracks already in this browser, so links added before auditing existed
+    // (or while the collector was unreachable) still reach the catalogue. Cut off at what one request can carry.
+    const library = [];
+    let size = 0;
+    for (const t of personal) {
+      const d = describe(t);
+      size += bytes(d);
+      if (library.length >= MAX_LIBRARY || size > LIBRARY_BYTES) break;
+      library.push(d);
+    }
     emit("session_start", {
       userAgent: navigator.userAgent, ...hints,
       screen: `${screen.width}x${screen.height}@${devicePixelRatio}`, viewport: `${innerWidth}x${innerHeight}`,
       language: navigator.language, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       referrer: document.referrer || undefined, standalone: matchMedia("(display-mode: standalone)").matches,
       repo: count("repo"), shared: count("shared"), personal: personal.length,
+      library, libraryTruncated: library.length < personal.length || undefined,
     }, 0);
-    // Tracks that were in this browser before auditing existed, or added while the collector was unreachable.
-    const seen = new Set(storage.load("audit-seen", []));
-    const fresh = personal.filter((t) => !seen.has(t.id));
-    for (const t of fresh) emit("track_add", { ...describe(t), existing: true });
-    if (fresh.length) markSeen(fresh.map((t) => t.id));
 
     const cur = s.tracks[s.order[s.position]];
     prev = { ids: s.tracks.map((t) => t.id), currentId: cur?.id ?? null, playing: false, failed: s.failed, item: s.item, started: false };
