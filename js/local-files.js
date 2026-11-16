@@ -3,7 +3,9 @@ import { tx, STORES } from "./db.js";
 import { probe } from "./probe.js";
 
 const urls = new Map();
-const AUDIO_EXT = /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|mp4|m4v|webm|mov)$/i;
+// Any audio or video extension: the browser reports an empty MIME type for many of these, so the type alone is not enough.
+// Whether a file can actually be decoded is decided later, by Cloudinary or by probe().
+const MEDIA_EXT = /\.(mp3|mp2|mpga|m4a|m4b|aac|ogg|oga|opus|wav|wave|flac|aif|aiff|aifc|amr|wma|mka|weba|caf|ac3|ape|wv|tta|dsf|au|snd|ra|mid|midi|3ga|mp4|m4v|mov|webm|mkv|avi|wmv|flv|f4v|mpg|mpeg|mpe|m2v|ts|mts|m2ts|3gp|3g2|ogv|vob|mxf|asf)$/i;
 
 function toTrack(rec) {
   const src = URL.createObjectURL(rec.blob);
@@ -13,12 +15,13 @@ function toTrack(rec) {
 
 /** Guesses title/artist from a filename like "Artist - Title.mp3". */
 export function describe(name) {
-  const base = name.replace(AUDIO_EXT, "").replace(/_+/g, " ").trim();
+  const base = name.replace(/\.[a-z0-9]{1,5}$/i, "").replace(/_+/g, " ").trim();
   const [a, ...rest] = base.split(" - ");
   return rest.length ? { artist: a.trim(), title: rest.join(" - ").trim() } : { artist: "Local file", title: base };
 }
 
-export const isAudioFile = (file) => file.type.startsWith("audio/") || file.type.startsWith("video/") || AUDIO_EXT.test(file.name);
+/** True for any audio or video file. Video is accepted because it is always played back as audio. */
+export const isMediaFile = (file) => /^(audio|video)\//.test(file.type || "") || MEDIA_EXT.test(file.name);
 
 async function probeFile(file) {
   const url = URL.createObjectURL(file);
@@ -38,7 +41,7 @@ export async function add(files, meta = {}) {
   const added = [], rejected = [];
   let unsaved = 0;
   for (const file of files) {
-    if (!isAudioFile(file)) { rejected.push(file.name); continue; }
+    if (!isMediaFile(file)) { rejected.push(file.name); continue; }
     let duration;
     try { duration = await probeFile(file); } catch { rejected.push(file.name); continue; }
     const rec = { id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...describe(file.name), ...meta, duration, added: Date.now(), blob: file };

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { configure, isEnabled, validate, toRecord, deliveryUrls } from "../../js/cloud-upload.js";
+import { configure, isEnabled, validate, toRecord, deliveryUrls, hasNoAudio } from "../../js/cloud-upload.js";
 
 test("configure is off without a cloud name", () => {
   configure(undefined);
@@ -10,11 +10,27 @@ test("configure is off without a cloud name", () => {
   assert.match(validate({ name: "a.mp3", size: 1 }), /not configured/);
 });
 
-test("validate enforces format and size", () => {
+test("validate accepts any audio or video file and enforces size", () => {
   configure({ cloudName: "tivkdskh", maxBytes: 1000 });
-  assert.equal(validate({ name: "song.MP3", size: 999 }), null);
-  assert.match(validate({ name: "song.txt", size: 1 }), /not a supported format/);
+  for (const name of ["song.MP3", "voice.amr", "take.aiff", "clip.mkv", "old.AVI"]) assert.equal(validate({ name, size: 999 }), null, name);
+  assert.equal(validate({ name: "recording", type: "audio/x-whatever", size: 1 }), null);
+  assert.equal(validate({ name: "clip", type: "video/x-matroska", size: 1 }), null);
+  assert.match(validate({ name: "notes.txt", size: 1 }), /not an audio or video file/);
+  assert.match(validate({ name: "photo.png", type: "image/png", size: 1 }), /not an audio or video file/);
   assert.match(validate({ name: "song.mp3", size: 1001 }), /larger than/);
+});
+
+test("allowedFormats is an optional restriction", () => {
+  configure({ cloudName: "tivkdskh", allowedFormats: ["mp3"] });
+  assert.equal(validate({ name: "song.mp3", size: 1 }), null);
+  assert.match(validate({ name: "clip.mkv", size: 1 }), /not a supported format \(mp3\)/);
+});
+
+test("hasNoAudio only flags a video whose audio stream is empty", () => {
+  assert.equal(hasNoAudio({ public_id: "x" }), false);
+  assert.equal(hasNoAudio({ is_audio: true, audio: { codec: "mp3" }, video: {} }), false);
+  assert.equal(hasNoAudio({ is_audio: false, audio: { codec: "aac" }, video: { codec: "h264" } }), false);
+  assert.equal(hasNoAudio({ is_audio: false, audio: {}, video: { codec: "h264" } }), true);
 });
 
 test("delivery urls and record mapping", () => {

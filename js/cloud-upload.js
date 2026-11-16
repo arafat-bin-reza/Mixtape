@@ -1,13 +1,13 @@
 // Uploads user files to Cloudinary with an unsigned preset and turns the result into playable URL tracks.
 // Only the public cloud name and preset name are used; no API key or secret is ever needed in the browser.
 import * as urlTracks from "./url-tracks.js";
+import { isMediaFile } from "./local-files.js";
 
-const DEFAULT_FORMATS = ["mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "mp4", "m4v", "webm", "mov"];
 let cfg = null;
 
 export function configure(c) {
   cfg = c?.cloudName
-    ? { uploadPreset: "mixtape-unsigned", folder: "mixtape", sharedTag: "", allowUploaderShare: false, maxBytes: 100 * 1024 * 1024, allowedFormats: DEFAULT_FORMATS, ...c }
+    ? { uploadPreset: "mixtape-unsigned", folder: "mixtape", sharedTag: "", allowUploaderShare: false, maxBytes: 100 * 1024 * 1024, ...c }
     : null;
   return cfg;
 }
@@ -17,11 +17,14 @@ export const config = () => cfg;
 const ext = (name) => (name.match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase();
 const mb = (n) => `${Math.round(n / 1048576)} MB`;
 
-/** Returns an error message or null. Server-side limits on the preset remain the real guard. */
+/**
+ * Returns an error message or null. Any audio or video file passes; `allowedFormats` in config.json is an optional
+ * extra restriction by extension. Server-side limits on the preset remain the real guard.
+ */
 export function validate(file) {
   if (!cfg) return "Cloud upload is not configured.";
-  const e = ext(file.name);
-  if (!cfg.allowedFormats.includes(e)) return `"${file.name}" is not a supported format (${cfg.allowedFormats.join(", ")}).`;
+  if (!isMediaFile(file)) return `"${file.name}" is not an audio or video file.`;
+  if (cfg.allowedFormats?.length && !cfg.allowedFormats.includes(ext(file.name))) return `"${file.name}" is not a supported format (${cfg.allowedFormats.join(", ")}).`;
   if (file.size > cfg.maxBytes) return `"${file.name}" is larger than the ${mb(cfg.maxBytes)} limit.`;
   return null;
 }
@@ -77,9 +80,15 @@ export function upload(file, { title, artist, shared = false, onProgress, signal
   });
 }
 
+/** True when the upload response describes a video stream and an empty audio stream. Responses without stream details pass. */
+export const hasNoAudio = (res) =>
+  !res.is_audio && !!res.video && Object.keys(res.video).length > 0 && !!res.audio && Object.keys(res.audio).length === 0;
+
 /** Uploads, persists, and returns the playlist track. */
 export async function uploadTrack(file, opts) {
   const res = await upload(file, opts);
+  // Uploads are played as audio (the .mp3 rendition), so a silent video would only fail later, at play time.
+  if (hasNoAudio(res)) throw new Error("This video has no audio track.");
   const track = await urlTracks.save(toRecord(res, opts));
   // File details are for the audit log only; they are not persisted.
   return { ...track, file: { name: file.name, bytes: file.size, mime: file.type, shared: !!(opts?.shared && cfg.allowUploaderShare && cfg.sharedTag) } };

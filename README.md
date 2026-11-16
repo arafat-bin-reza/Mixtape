@@ -3,7 +3,7 @@
 A browser music player with a playlist. Plain HTML, CSS and JavaScript; no build step.
 
 - Plays the demo tracks in this repository.
-- **Add files** uploads your audio or video to Mixtape's cloud storage (Cloudinary) and plays it back as audio by URL. If an upload fails or you are offline, you can keep the file on your device only.
+- **Add files** uploads your audio or video to Mixtape's cloud storage (Cloudinary) and plays it back as audio by URL. Any audio or video format is accepted in the browser; a video is played as audio only, and one with no soundtrack is refused. Cloudinary decides whether it can read a particular format. A fork can limit uploads to given extensions with an optional `allowedFormats` array in `config.json`. If an upload fails or you are offline, you can keep the file on your device only.
 - **Add link** (or just paste a link on the page) plays a direct audio/video URL, or a SoundCloud, YouTube, Vimeo or Spotify track, as audio. Spotify plays through Spotify's own embedded player: you hear the full track if you are logged in to Spotify in that browser, otherwise a 30-second preview, and its volume is set inside the Spotify player. A Spotify album, playlist, podcast or artist link becomes one playlist row that plays through the whole collection; the Now Playing panel names the current item, and Mixtape moves to the next row when the collection ends. Facebook, Instagram and TikTok links and `spotify.link` short links are not supported.
 
 **Live:** `https://arafat-bin-reza.github.io/Mixtape/`
