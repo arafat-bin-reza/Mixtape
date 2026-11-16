@@ -100,3 +100,11 @@ dialog input:disabled{opacity:.6}
 /* Icon-only header buttons where the playlist header is tight: narrow phones, and the two-column layout on tablets. */
 @media (max-width:480px),(min-width:761px) and (max-width:960px){.actions .btn.text span{display:none}.actions .btn.text{padding:0;width:44px;border-radius:50%}}
 @media (max-width:480px){.preview{grid-template-columns:1fr}.upload-list .fields{grid-template-columns:1fr}}
+.link{border:0;background:none;padding:0;color:var(--accent);text-decoration:underline;cursor:pointer}
+.notice{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;background:var(--tint);border:1px solid var(--line);border-radius:14px;font-size:.9rem}
+.notice[hidden]{display:none}
+.notice p{margin:0}
+.foot{max-width:1040px;margin:0 auto;padding:0 24px 24px;text-align:center;font-size:.85rem}
+#privacy-dialog p{margin:0 0 12px;font-size:.95rem}
+#privacy-dialog a{color:var(--accent)}
+#privacy-dialog code{overflow-wrap:anywhere;font-size:.85em}

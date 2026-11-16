@@ -50,6 +50,7 @@ Modules never call each other to update the screen. They patch state; subscriber
 | `js/local-files.js` | IndexedDB CRUD for user-added files; probes duration with a throwaway `<audio>`; parses `Artist - Title` from filenames. |
 | `js/media-session.js` | Mirrors state to `navigator.mediaSession`. |
 | `js/storage.js` | Safe `localStorage` wrapper. |
+| `js/audit.js` | Usage audit log. Subscribes to state, derives add/remove/play events, and posts batches to the collector in `collector/` (Cloudflare Worker + D1). Inert when `config.json` has no `audit.endpoint`. See `plan.md` Part D and `collector/README.md`. |
 
 ### 2.3 Track data model
 

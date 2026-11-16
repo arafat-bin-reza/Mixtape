@@ -1,0 +1,12 @@
+{
+  "name": "mixtape-audit-collector",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "schema:local": "wrangler d1 execute mixtape-audit --local --file schema.sql",
+    "schema:remote": "wrangler d1 execute mixtape-audit --remote --file schema.sql"
+  },
+  "devDependencies": { "wrangler": "^4.0.0" }
+}

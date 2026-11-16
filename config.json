@@ -7,5 +7,10 @@
     "allowUploaderShare": false,
     "maxBytes": 104857600,
     "allowedFormats": ["mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "mp4", "m4v", "webm", "mov"]
+  },
+  "audit": {
+    "endpoint": "https://mixtape-audit.mixtape-audit-collector.workers.dev/v1/events",
+    "flushSeconds": 15,
+    "retentionDays": 365
   }
 }

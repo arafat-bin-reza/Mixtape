@@ -1,0 +1,27 @@
+name = "mixtape-audit"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+account_id = "3f115df566d59e21e801998777e5fbfe"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGINS = "https://arafat-bin-reza.github.io,http://localhost:8000"
+RETENTION_DAYS = "365"
+
+# Secrets are never written here. Set the admin token with: npx wrangler secret put ADMIN_TOKEN
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mixtape-audit"
+database_id = "357a1de4-1216-4430-b496-c525ddbe683a"
+
+[triggers]
+crons = ["17 3 * * *"] # daily retention purge
+
+[[ratelimits]]
+name = "RATE"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 60
+  period = 60

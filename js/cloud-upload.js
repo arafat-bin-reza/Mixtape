@@ -80,7 +80,9 @@ export function upload(file, { title, artist, shared = false, onProgress, signal
 /** Uploads, persists, and returns the playlist track. */
 export async function uploadTrack(file, opts) {
   const res = await upload(file, opts);
-  return urlTracks.save(toRecord(res, opts));
+  const track = await urlTracks.save(toRecord(res, opts));
+  // File details are for the audit log only; they are not persisted.
+  return { ...track, file: { name: file.name, bytes: file.size, mime: file.type, shared: !!(opts?.shared && cfg.allowUploaderShare && cfg.sharedTag) } };
 }
 
 /** Owner-curated public playlist: every Cloudinary resource tagged `sharedTag` (needs "Resource list" enabled in the console). */

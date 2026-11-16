@@ -5,6 +5,7 @@ import * as playlist from "./playlist.js";
 import * as local from "./local-files.js";
 import * as urlTracks from "./url-tracks.js";
 import * as cloud from "./cloud-upload.js";
+import * as audit from "./audit.js";
 import { initUI, toast } from "./ui.js";
 import { initMediaSession } from "./media-session.js";
 
@@ -32,6 +33,7 @@ const onNext = () => playlist.next();
 
 const config = await loadConfig();
 cloud.configure(config.cloudinary);
+audit.configure(config.audit);
 
 player.init({
   embedContainer: document.getElementById("embed"),
@@ -56,6 +58,7 @@ const own = new Set(urls.map((t) => t.externalId));
 const personal = [...mine, ...urls].sort((a, b) => (a.added ?? 0) - (b.added ?? 0));
 playlist.setTracks([...repo, ...shared.filter((t) => !own.has(t.externalId)), ...personal], saved.last);
 if (warning) toast(warning);
+audit.start();
 
 // Persist settings whenever they change.
 let snapshot = "";

@@ -30,6 +30,10 @@
 
 <h1 class="sr">Music Player</h1>
 <main class="app">
+  <div id="audit-notice" class="notice" role="region" aria-label="Usage log notice" hidden>
+    <p>Mixtape keeps a usage log: your IP address, device details, the links and files you add, and what you play. <button type="button" class="link" id="audit-notice-more">See Privacy</button></p>
+    <button type="button" class="btn text" id="audit-notice-ok">OK</button>
+  </div>
   <section class="player" aria-label="Now playing">
     <div class="cover" id="cover"><span id="cover-letter" aria-hidden="true"></span><img id="cover-img" alt="" hidden><div id="embed" class="embed"></div></div>
     <div class="meta">
@@ -67,6 +71,18 @@
     <ul id="tracks"></ul>
   </section>
 </main>
+<footer class="foot"><button type="button" class="link" id="privacy-link">Privacy</button></footer>
+
+<dialog id="privacy-dialog" aria-labelledby="privacy-heading">
+  <h2 id="privacy-heading">Privacy</h2>
+  <div id="privacy-audit" hidden>
+    <p>Mixtape keeps a usage log that only the site owner can read. It records your IP address and approximate location, your browser and device details, the links and files you add (names and details; the audio of files kept on this device is never sent), and what you play and for how long.</p>
+    <p>The log is stored on Cloudflare for up to <span id="privacy-days">365</span> days. The list of links is kept longer, without your IP address.</p>
+    <p>To have your records deleted, <a href="https://github.com/arafat-bin-reza/Mixtape/issues" target="_blank" rel="noopener">open an issue</a> and quote this visitor id: <code id="privacy-visitor"></code></p>
+  </div>
+  <p>Files you upload go to Cloudinary and can be played by anyone who has the URL. YouTube, SoundCloud, Vimeo and Spotify players load from those services under their own privacy policies. Your settings and personal playlist stay in this browser.</p>
+  <div class="dialog-actions"><button type="button" class="btn text" id="privacy-close">Close</button></div>
+</dialog>
 
 <dialog id="link-dialog" aria-labelledby="link-heading">
   <form id="link-form" novalidate>

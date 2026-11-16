@@ -32,6 +32,15 @@ Owner setup lives in `plan.md`, section 15. The public playlist (tracks tagged `
 
 If you believe something uploaded here infringes your rights, open an issue on this repository and it will be removed.
 
+## Privacy
+
+- **Usage log.** When `audit.endpoint` is set in `config.json`, Mixtape keeps a usage log that only the site owner can read: each visit's IP address, approximate location (from Cloudflare) and browser/device details; the links and files a visitor adds (file names and details, never the audio of device-only files); and what is played, for how long, and whether it finished. A notice is shown on the first visit and the Privacy link at the bottom of the page explains this and shows the visitor id.
+- **Where and how long.** The log is stored in a Cloudflare D1 database behind the Worker in `collector/`. Sessions and events are deleted after 365 days. The catalogue of links is kept, with the IP address and visitor id removed at the same age.
+- **Deletion.** Open an issue on this repository and quote the visitor id from the Privacy panel; the owner removes that visitor's records.
+- **Other services.** Uploaded files are stored by Cloudinary and can be played by anyone who has the URL. YouTube, SoundCloud, Vimeo and Spotify players load from those services under their own policies. Settings and the personal playlist stay in the browser.
+
+To run a fork without the usage log, leave `audit.endpoint` empty. Collector deployment and the queries for reading the log are in `collector/README.md`.
+
 ## Keyboard shortcuts
 
 Space play/pause · ←/→ seek 5 s · ↑/↓ volume · N next · P previous · M mute · Ctrl/Cmd+V paste a link
@@ -50,7 +59,7 @@ npm run test:unit                 # unit tests only
 npx playwright test -g "YouTube"  # one browser test by title
 ```
 
-Browser tests stub `config.json`, Cloudinary and the YouTube SDK, so they never touch the network.
+Browser tests stub `config.json`, Cloudinary, the audit collector and the YouTube SDK, so they never touch the network.
 
 ## Credits
 

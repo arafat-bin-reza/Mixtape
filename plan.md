@@ -1,10 +1,11 @@
 # Plan: External Links as Audio, and Cloudinary Storage for Uploads
 
-This plan has three parts that share one playback path:
+This plan has four parts. Parts A-C share one playback path; Part D observes it:
 
 - **Part A** (sections 1-10): paste a link to a video or audio hosted elsewhere and play it as an audio track.
 - **Part B** (sections 11-20): let a listener upload media to Cloudinary so it is stored in the cloud rather than only in their browser, and play it back through the same direct-URL path as Part A.
 - **Part C** (sections 21-30): paste a Spotify track or episode link and play it through Spotify's official embedded player, as a fourth provider engine beside YouTube, SoundCloud and Vimeo.
+- **Part D** (sections 31-41): an audit log of who uses the app (IP address, device), which tracks they add and listen to, and the links and details of those tracks. Not yet implemented; needs a small server-side collector because a static site cannot see IP addresses or store shared data.
 
 Part C adds `js/engines/spotify.js` and parser rules; it depends on Part A's engine layer and Add-link dialog, both already built.
 
@@ -603,3 +604,250 @@ Not yet verified live: Safari and Firefox, a logged-in session, and switching be
 | Web Playback SDK requirements | Premium account; Chrome, Firefox, Safari, Edge; iframes must allow `encrypted-media` and `autoplay`; non-commercial use only without written approval. Development Mode user cap and the 250,000 MAU extended-quota rule make it unsuitable for a public site; not pursued. |
 
 Of the items originally left for Step 0, cadence, iframe attributes, autoplay after the controller is ready, and preview duration are now verified above; end-of-track pattern, seek while paused, and `loadEntity` between two Spotify tracks remain manual.
+
+---
+
+# Part D: Usage Audit Log
+
+## 31. Goal
+
+Keep a durable, owner-readable record of:
+
+1. **Who is using the app**: each visit, with the visitor's IP address, approximate location, and device (browser, operating system, device type, screen, language).
+2. **What they add**: every pasted link, Cloudinary upload and device-only file, with the full link and the details Mixtape already holds (title, artist, provider, duration, cover).
+3. **What they listen to**: every track played, for how long, and whether it finished, was skipped or failed.
+4. **A catalogue of every link ever seen**, with its details, independent of whether the visitor later removes it from their own playlist.
+
+Logging is on for every visitor whenever the collector is configured, with no per-user switch.
+
+## 32. Constraints That Shape the Design
+
+| Constraint | Consequence |
+|---|---|
+| **Mixtape is a static site on GitHub Pages.** There is no server, GitHub exposes no access logs, and browser JavaScript cannot read the visitor's own public IP address. | A small server-side **collector** is required. It reads the IP from the incoming request, so the client never reports (and cannot forge) its own address. |
+| **Personal tracks live only in the visitor's browser** (IndexedDB). The owner currently has no view of pasted links at all. | The client must send each added link and its details to the collector at the moment it is added. |
+| **No secrets in this repo** (CLAUDE.md, Cloudinary section). | The collector is a separate deployment with its own environment. `config.json` holds only its public URL. |
+| **"Device" on the web means browser-reported data.** User-Agent string, Client Hints (platform, model on Android Chrome), screen size, language, time zone. There is no device name, serial number or MAC address available to a web page. | The log identifies a browser install through a random visitor id kept in `localStorage`, plus the device description. Clearing site data or using a private window produces a new visitor id; the IP address still links the sessions. |
+| **An IP address identifies a network, not a person.** Mobile carriers, offices and VPNs share or rotate addresses. | Store IP together with visitor id and session id; none of the three alone is "who". |
+| **Client-side logging is best effort.** Content blockers can block the collector's domain, and anyone can post invented events to a public endpoint. | Treat the log as a usage record, not as forensic proof. Mitigations in section 38. A visit that is blocked entirely leaves no trace; nothing on a static host can change that. |
+| **IP address plus listening history is personal data** under GDPR, UK GDPR, CCPA and similar laws. | A visible notice in the app, a privacy section in the README, a retention period, and a way to delete one visitor's records (section 37). These are owner decisions listed in section 41. |
+| **Browser tests must never hit the network** (CLAUDE.md, testing notes). | Auditing is disabled when `config.json` has no `audit.endpoint`; the existing `{}` stub already turns it off. |
+
+## 33. Collector: Options and Recommendation
+
+| Option | IP and location | Storage | Cost | Notes |
+|---|---|---|---|---|
+| **Cloudflare Worker + D1 (recommended)** | `CF-Connecting-IP` header; `request.cf` gives country, city, region, ASN and time zone | D1 (SQLite), SQL queries | Free plan (limits to be confirmed in step D0) | One file of JavaScript, deploys with `wrangler`, scheduled triggers for retention, built-in rate limiting. Same platform section 17 already proposes for signed uploads, so the two can share a Worker later. |
+| Netlify / Vercel function + hosted Postgres (Neon, Supabase) | `x-forwarded-for`, `x-vercel-ip-country` | Postgres | Free tiers | Two vendors to configure instead of one. |
+| Supabase only (client writes straight to a table) | Not available to a plain insert; needs an Edge Function anyway | Postgres | Free tier | No advantage over a Worker. |
+| Third-party analytics (Plausible, GA4, PostHog) | Most hide or truncate IPs by design | Vendor | Varies | Does not meet the "which IP, which link" requirement. Rejected. |
+
+**Recommendation: one Cloudflare Worker with a D1 database**, source kept in a `collector/` folder of this repository (Worker source is harmless to publish; secrets are set with `wrangler secret put` and never committed). If the owner prefers, the same folder can live in a separate private repository with no other change.
+
+## 34. What Is Logged
+
+All events share an envelope added by the client: `visitorId`, `sessionId`, `ts` (client clock, ms), `seq` (per-session counter), `type`. The collector adds `receivedAt`, IP and location to the session row.
+
+| Event | When | Fields |
+|---|---|---|
+| `session_start` | Once per page load, after the playlist is built | `userAgent`, Client Hints when available (`platform`, `platformVersion`, `model`, `mobile`, browser brand and version), `screen` (w x h, device pixel ratio), `viewport`, `language`, `timeZone`, `referrer`, `standalone` (installed/PWA), counts of repo / shared / personal tracks, and a **library snapshot**: the list of personal track records already in the browser (so links added before auditing existed are captured on the next visit). |
+| `track_add` | A track id appears in `state.tracks` after startup | `trackId`, `source` (`url` / `local`), `provider`, `url` (the canonical link, or the Cloudinary delivery URL), `externalId`, `kind` (Spotify), `title`, `artist`, `duration`, `cover`, `shared` (Cloudinary shared tag), and for files `fileName`, `bytes`, `mime`. The audio content of device-only files is never sent. |
+| `track_remove` | A track id disappears from `state.tracks` | `trackId` |
+| `play_start` | A track first reaches `playing: true` after becoming current | `trackId`, `source`, `provider`, `title`, `artist`, `url`, `duration`, `preview` (Spotify 30 s preview), `shuffle`, `repeat` |
+| `play_end` | The current track changes, ends, fails, or the page is hidden | `trackId`, `listenedSec` (wall-clock time spent in `playing: true`, so seeking does not inflate it), `positionSec`, `durationSec`, `reason`: `ended` / `skipped` / `error` / `closed` |
+| `collection_item` | `state.item` changes while a Spotify album, playlist, show or artist row plays | `trackId` of the row, `itemUri`, resolved item title when available |
+| `play_error` | A track id is added to `state.failed` | `trackId`, `url`, the message from `state.error` |
+
+Notes:
+
+- Repo and shared tracks are logged on play like any other; their details come from `data/tracks.json` and the Cloudinary list, so `track_add` is not emitted for them.
+- Unlisted Vimeo links carry a private `hash`. Logging the full link stores that hash in the audit database; that is intended (the requirement is to keep the links), and it is one reason the database must stay private.
+- No seek, volume, theme or keyboard events. They add volume without answering "who, what, which link".
+
+## 35. Architecture
+
+### 35.1 Configuration
+
+`config.json` gains a public, committable block:
+
+```json
+"audit": {
+  "endpoint": "https://mixtape-audit.<account>.workers.dev/v1/events",
+  "flushSeconds": 15
+}
+```
+
+A missing or empty `endpoint` disables auditing completely: no visitor id is created and no request is made.
+
+### 35.2 New module `js/audit.js`
+
+Follows the existing rule that modules do not call each other to report things; it is a **state subscriber**, so `ui.js`, `player.js`, `playlist.js` and the engines need no changes.
+
+| Export | Behaviour |
+|---|---|
+| `configure(cfg)` | Stores the endpoint. Reads or creates `visitorId` (`crypto.randomUUID()`, kept through `storage.js` as `music-player:visitor`) and a fresh `sessionId` per page load. |
+| `start()` | Called from `app.js` once, right after `playlist.setTracks(...)`. Records the baseline set of track ids, sends `session_start` with the library snapshot, then subscribes to state. |
+| `diff(prev, next)` (pure, unit-tested) | Given two reduced snapshots `{ ids, currentId, playing, failed, item }`, returns the events to emit. All detection logic lives here so it runs under `node --test` without a browser. |
+| `describe(track)` (pure, unit-tested) | Maps a track object to the logged fields in section 34. |
+
+Internals:
+
+- **Listening time.** A small accumulator adds wall-clock time while `playing` is true for the current track id and closes into `play_end` on track change, end, error or page hide. `timeupdate`-driven state changes are ignored unless one of the watched fields changed, so the subscriber costs a few comparisons per tick.
+- **Batching.** Events queue in memory and flush every `flushSeconds`, when the queue reaches 20 events, and on `visibilitychange` to hidden and `pagehide`. Flushes use `fetch(endpoint, { method: "POST", keepalive: true, body })` with `Content-Type: text/plain` so no CORS preflight is needed; the page-hide flush uses `navigator.sendBeacon`.
+- **Offline and failures.** A failed batch is kept in `localStorage` (`music-player:audit-queue`, capped at 200 events, oldest dropped) and retried on the next flush or next visit. Failures are silent: auditing must never surface an error or delay playback.
+- **Upload details.** `track_add` for a file needs `fileName`, `bytes` and `mime`, which are not on the track object. `local-files.js` and `cloud-upload.js` add those three fields to the track they already return (`file: { name, bytes, mime }`); `audit.describe()` reads them. This is the only change to existing modules besides `app.js`.
+
+### 35.3 Changes to existing files
+
+| File | Change |
+|---|---|
+| `js/app.js` | `audit.configure(config.audit)` beside `cloud.configure(...)`; `audit.start()` after `playlist.setTracks(...)`. |
+| `js/local-files.js`, `js/cloud-upload.js` | Attach `file: { name, bytes, mime }` to new tracks (not persisted beyond what is already stored). |
+| `index.html`, `css/style.css`, `js/ui.js` | One-time dismissible notice and a permanent "Privacy" link in the footer (section 37). New ids: `#audit-notice`, `#audit-notice-ok`. |
+| `config.json` | The `audit` block. |
+| `README.md` | New Privacy section. |
+| `CLAUDE.md`, `technical.md` | Module table, config notes, test stubs. |
+
+### 35.4 Collector (`collector/`)
+
+```
+collector/
+  wrangler.toml        D1 binding, rate-limit binding, cron trigger, ALLOWED_ORIGINS var
+  schema.sql           tables below
+  src/index.js         the Worker
+  README.md            deploy and query instructions
+```
+
+Endpoints:
+
+| Route | Auth | Behaviour |
+|---|---|---|
+| `POST /v1/events` | None (public). Checked: `Origin` in `ALLOWED_ORIGINS`, body under 64 KB, at most 50 events, each event validated against the section 34 shapes, strings truncated to fixed lengths, per-IP rate limit. | Upserts the session row with IP, location and device; inserts events; upserts the track catalogue. Responds `204`. |
+| `GET /v1/admin/sessions`, `/events`, `/tracks` | `Authorization: Bearer <ADMIN_TOKEN>` (a Worker secret), or Cloudflare Access in front of `/v1/admin/*` | Filterable JSON or CSV (`?format=csv`, `?from=`, `?to=`, `?ip=`, `?visitor=`, `?track=`). |
+| `DELETE /v1/admin/visitors/:id` | Same | Removes one visitor's sessions and events (erasure requests). |
+| Cron trigger, daily | n/a | Deletes sessions and events older than `RETENTION_DAYS`. The track catalogue is kept. |
+
+Device parsing: the Worker stores the raw User-Agent and Client Hints and derives `browser`, `os` and `deviceType` (`mobile` / `tablet` / `desktop`) with a small built-in matcher, so the admin views are readable without a dependency.
+
+### 35.5 Data model (D1)
+
+```sql
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,            -- sessionId from the client
+  visitor_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL,    -- server time, ms
+  last_seen_at INTEGER NOT NULL,
+  ip TEXT NOT NULL,
+  country TEXT, region TEXT, city TEXT, asn INTEGER, as_org TEXT,
+  user_agent TEXT, browser TEXT, os TEXT, device_type TEXT, device_model TEXT,
+  screen TEXT, language TEXT, time_zone TEXT, referrer TEXT
+);
+CREATE INDEX sessions_visitor ON sessions (visitor_id, started_at);
+CREATE INDEX sessions_ip ON sessions (ip, started_at);
+
+CREATE TABLE events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES sessions (id),
+  visitor_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  client_ts INTEGER NOT NULL,
+  received_at INTEGER NOT NULL,
+  ip TEXT NOT NULL,               -- repeated: the address can change mid-session
+  type TEXT NOT NULL,
+  track_id TEXT,
+  listened_sec REAL,
+  reason TEXT,
+  detail TEXT,                    -- JSON for the remaining fields
+  UNIQUE (session_id, seq)        -- makes retried batches idempotent
+);
+CREATE INDEX events_track ON events (track_id, received_at);
+CREATE INDEX events_type ON events (type, received_at);
+
+CREATE TABLE tracks (             -- every link ever added or played, with details
+  track_id TEXT PRIMARY KEY,
+  source TEXT, provider TEXT, kind TEXT,
+  url TEXT, external_id TEXT,
+  title TEXT, artist TEXT, duration REAL, cover TEXT,
+  file_name TEXT, bytes INTEGER, mime TEXT,
+  first_seen_at INTEGER NOT NULL, first_visitor_id TEXT, first_ip TEXT,
+  last_seen_at INTEGER NOT NULL,
+  add_count INTEGER NOT NULL DEFAULT 0,
+  play_count INTEGER NOT NULL DEFAULT 0,
+  listened_sec REAL NOT NULL DEFAULT 0
+);
+```
+
+Because URL track ids are deterministic (`url-<provider>-<id>`, `cloud-<public_id>`), the same link pasted by different visitors lands on one `tracks` row with a rising `add_count`.
+
+## 36. Reading the Log
+
+Phase 1 needs no UI: the Cloudflare dashboard's D1 console, `wrangler d1 execute`, and the CSV endpoints cover the questions the log exists to answer. `collector/README.md` ships these as saved queries:
+
+- Visitors in a date range, with IP, location, device, session count and total listening time.
+- Everything one IP address or visitor id did, in order.
+- All links added, newest first, with who added them and from where.
+- Most played tracks, and who played a given track.
+
+Phase 2 (optional): a single read-only admin page served by the Worker itself at `/v1/admin/`, protected by Cloudflare Access, with those four views as tables. It is deliberately not part of the public GitHub Pages site.
+
+## 37. Privacy and Disclosure
+
+- **Notice.** On first visit with auditing enabled, a dismissible bar: "Mixtape keeps a usage log: your IP address, device details, the links and files you add, and what you play. See Privacy." Dismissal is remembered in `localStorage`. Logging starts immediately, as the requirement asks; whether it should instead wait for a click is the owner's decision in section 41, since visitors from the EU/UK generally must agree first.
+- **README Privacy section.** What is collected, why, where it is stored (Cloudflare), how long, who can read it (the owner only), and how to ask for deletion. The README currently has no privacy section; the Cloudinary and Spotify privacy notes called for in step B7 and section 27 go into the same section.
+- **Retention.** `RETENTION_DAYS` on the Worker, proposed default 365. Sessions and events are purged after that; the track catalogue (links and details, with `first_ip` cleared at the same age) is kept indefinitely.
+- **Erasure.** `DELETE /v1/admin/visitors/:id`; the visitor id is shown on the Privacy link's panel so a visitor can quote it.
+- **Access.** The database is readable only through the Cloudflare account and the admin token. No read endpoint is public.
+
+## 38. Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| **Forged or spam events.** The write endpoint is public and its URL is in `config.json`. | `Origin` allowlist (stops other websites; does not stop scripts), strict schema and length limits, 64 KB body cap, Cloudflare rate-limiting binding per IP (for example 60 requests/minute), `UNIQUE (session_id, seq)`. The IP column is always the real sender's. Optional later: Cloudflare Turnstile token on `session_start`. |
+| **Content blockers stop the request.** | A `workers.dev` host with a neutral path is less likely to be on block lists than an analytics vendor. Routing the Worker under a custom domain owned by the site is the stronger fix. Blocked visitors are simply not logged. |
+| **Events lost when the tab closes.** | Flush on `visibilitychange` and `pagehide` with `sendBeacon`; unsent events persist in `localStorage` and go out on the next visit. `play_end` with reason `closed` is therefore sometimes late, never duplicated. |
+| **Free-plan limits** on Worker requests and D1 writes per day. | Batching keeps a typical session to a handful of requests, far below any plausible limit at demo scale; confirm the current numbers in step D0. If D1 rejects a write the Worker still returns `204` and drops the batch, so the app is never affected. |
+| **Audit code breaks playback.** | The subscriber is wrapped in `try/catch`, does no DOM work, and never awaits in the state path. With no endpoint configured the module is inert. |
+| **Sensitive links in the log** (unlisted Vimeo hashes, private Cloudinary URLs). | Database is private; admin endpoints require the token or Access; CSV exports are the owner's responsibility. |
+| **Legal exposure from collecting IP addresses without notice.** | Section 37. The notice and README text ship in the same change as the logging, not after. |
+| **Tests accidentally reach the collector.** | Disabled under the existing `{}` config stub; the new audit tests route the endpoint with `page.route()` and assert on captured bodies. |
+
+## 39. Implementation Steps
+
+| Step | Work | Files | Est. |
+|---|---|---|---|
+| D0 | Owner creates a Cloudflare account and decides the items in section 41. Spike: deploy a ten-line Worker, confirm `CF-Connecting-IP` and `request.cf` values, confirm a `text/plain` `fetch` with `keepalive` and a `sendBeacon` from the GitHub Pages origin both arrive without preflight, note the current free-plan limits. | scratch only | 0.25 d |
+| D1 | Collector: `schema.sql`, `POST /v1/events` with validation, rate limit, session upsert, event insert, catalogue upsert, UA matcher. Tested locally with `wrangler dev` and a local D1. | `collector/` | 1.25 d |
+| D2 | `js/audit.js`: `configure`, `start`, pure `diff` and `describe`, listening-time accumulator, batching, offline queue. Node unit tests for `diff` (add, remove, play, skip, end, error, collection item, no event on plain time ticks) and `describe` (each provider, local file, shared track). | `js/audit.js`, `tests/unit/audit.test.js` | 1.25 d |
+| D3 | Wire into `app.js`; add `file` details in `local-files.js` and `cloud-upload.js`; `config.json` block. | `js/app.js`, `js/local-files.js`, `js/cloud-upload.js`, `config.json` | 0.25 d |
+| D4 | Notice bar, Privacy panel with visitor id, footer link; 320 px layout check. | `index.html`, `css/style.css`, `js/ui.js` | 0.5 d |
+| D5 | Playwright: with a routed endpoint, loading the page posts `session_start`; adding a link posts `track_add` with the canonical URL; playing the fixture tone to the end posts `play_start` and `play_end` with reason `ended`; with `{}` config no request is made and no visitor id is stored. | `tests/audit.spec.js` | 0.75 d |
+| D6 | Admin read endpoints with CSV, visitor delete, retention cron, saved queries. | `collector/` | 0.75 d |
+| D7 | README Privacy section, CLAUDE.md and `technical.md` updates, collector deploy notes. | docs | 0.25 d |
+| D8 (optional) | Admin page behind Cloudflare Access. | `collector/` | 1 d |
+
+Total: about 5.25 developer-days without D8.
+
+## 40. Acceptance Criteria
+
+1. With `audit.endpoint` set, opening the app creates one session row holding the visitor's IP address, country and city, browser, operating system, device type and screen size.
+2. Pasting a link, uploading to Cloudinary, and adding a device-only file each produce a `track_add` event and a `tracks` row containing the link (or file name) and the title, artist, provider and duration shown in the playlist.
+3. Tracks that were already in a visitor's browser before auditing shipped appear in the catalogue after that visitor's next visit.
+4. Playing a track produces `play_start`, and exactly one `play_end` whose `listenedSec` is within 2 seconds of the real listening time and whose `reason` matches what happened (ended, skipped, error, closed).
+5. The owner can answer, with one saved query or CSV export each: who visited in a period and from which IP and device; what one IP did; which links were added and by whom; who listened to a given track.
+6. With `audit.endpoint` missing or empty, no request is sent, nothing is written to `localStorage` for auditing, and the app behaves exactly as it does today.
+7. A collector outage, a blocked request or an offline device causes no visible error and no playback delay; queued events are delivered on a later visit.
+8. The notice appears on first visit, the README states what is collected and for how long, and one visitor's records can be deleted by id.
+9. No token, secret or database credential exists in this repository or in any request the page makes.
+10. All existing unit and browser tests pass, and no test makes a real network request.
+
+## 41. What the Owner Needs to Provide or Decide
+
+| Item | Options | Proposed default |
+|---|---|---|
+| Cloudflare account and Worker name | Free plan is enough | `mixtape-audit` on `workers.dev` |
+| Where the collector source lives | `collector/` in this repo, or a separate private repo | `collector/` here |
+| Notice model | Log immediately with a notice, or log only after the visitor clicks OK | Log immediately with a notice (matches "always"); switch to click-first if EU/UK visitors are expected |
+| Retention | 90 days, 365 days, or indefinite | 365 days for sessions and events; catalogue kept |
+| Admin access | Bearer token, or Cloudflare Access with the owner's email | Token for phase 1 |
+| Allowed origins | The GitHub Pages URL, plus `http://localhost:8000` for development | Both |
+| Contact for deletion requests | An email address or issue link to print in the README | Owner to supply |

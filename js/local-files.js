@@ -43,7 +43,7 @@ export async function add(files, meta = {}) {
     try { duration = await probeFile(file); } catch { rejected.push(file.name); continue; }
     const rec = { id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...describe(file.name), ...meta, duration, added: Date.now(), blob: file };
     try { await tx(STORES.local, "readwrite", (s) => s.put(rec)); } catch { unsaved++; }
-    added.push(toTrack(rec));
+    added.push({ ...toTrack(rec), file: { name: file.name, bytes: file.size, mime: file.type } }); // file details are for the audit log only; not persisted
   }
   return { added, rejected, unsaved };
 }

@@ -5,6 +5,7 @@ import * as local from "./local-files.js";
 import * as urlTracks from "./url-tracks.js";
 import * as cloud from "./cloud-upload.js";
 import * as storage from "./storage.js";
+import * as audit from "./audit.js";
 
 const $ = (id) => document.getElementById(id);
 export const formatTime = (s) => {
@@ -339,6 +340,18 @@ export function initUI({ onPrev, onNext }) {
     applyTheme(next);
     storage.save("theme", next);
   };
+
+  // Privacy panel and the usage-log notice (shown until dismissed, only when auditing is configured)
+  const openPrivacy = () => {
+    $("privacy-audit").hidden = !audit.isEnabled();
+    if (audit.isEnabled()) { $("privacy-visitor").textContent = audit.visitorId(); $("privacy-days").textContent = audit.config().retentionDays; }
+    $("privacy-dialog").showModal();
+  };
+  $("privacy-link").onclick = openPrivacy;
+  $("privacy-close").onclick = () => $("privacy-dialog").close();
+  $("audit-notice").hidden = !audit.isEnabled() || storage.load("audit-notice", false);
+  $("audit-notice-more").onclick = openPrivacy;
+  $("audit-notice-ok").onclick = () => { $("audit-notice").hidden = true; storage.save("audit-notice", true); };
 
   // Link dialog
   let linkTimer;
