@@ -404,6 +404,8 @@ test("Spotify album is one row whose heading follows the item being played, and 
   await row.locator(".row").click();
   await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
   await expect(page.locator("#title")).toHaveText("Stub Album");
+  // #play shows Pause as soon as the row is clicked; the fake embed API loads a moment later.
+  await page.waitForFunction(() => window.__sp?.calls.length > 0);
   expect(await page.evaluate(() => window.__sp.calls[0])).toEqual(["create", "spotify:album:1DFixLWuPkv3KT3TnV35m3"]);
 
   // The embed reports which item is playing; the heading shows it with the collection beneath.
