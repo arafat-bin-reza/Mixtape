@@ -8,14 +8,31 @@ import { createVimeo } from "./engines/vimeo.js";
 import { createSpotify } from "./engines/spotify.js";
 
 const factories = { youtube: createYouTube, soundcloud: createSoundCloud, vimeo: createVimeo, spotify: createSpotify };
-let engine = null, html = null, loadedId = null, container = null, callbacks = {};
+let engine = null, html = null, loadedId = null, container = null, callbacks = {}, options = {};
+const START_HINT = "YouTube hasn't started. Tap the player to start it, or wait for the ad to finish.";
 let applied = { volume: null, muted: null };
 
-const providerOf = (track) => (track.provider in factories ? track.provider : "direct");
+// With playback.resolver set, a YouTube track is played as plain audio from that server by the html engine
+// (no embed, so no video and no ads). A track the resolver cannot serve goes back to the embed engine.
+const unresolved = new Set();
+let viaResolver = null;
+const resolverBase = () => (typeof options.resolver === "string" ? options.resolver.replace(/\/+$/, "") : "");
+const resolves = (track) => track.provider === "youtube" && !!track.externalId && !!resolverBase() && !unresolved.has(track.id);
+const providerOf = (track) => (track.provider in factories && !resolves(track) ? track.provider : "direct");
+
+function fail(e) {
+  if (viaResolver && viaResolver === loadedId) {
+    unresolved.add(viaResolver);
+    viaResolver = loadedId = null;
+    sync(getState());
+    return;
+  }
+  callbacks.onError?.(e);
+}
 
 function make(factory) {
   const handlers = {};
-  const eng = factory({ container, handlers });
+  const eng = factory({ container, handlers, options });
   const live = () => engine === eng;
   Object.assign(handlers, {
     onTime: (t) => live() && setState({ currentTime: t }),
@@ -23,10 +40,13 @@ function make(factory) {
     onPlay: () => live() && setState({ playing: true }),
     onPause: () => live() && setState({ playing: false }),
     onEnded: () => live() && callbacks.onEnded?.(),
-    onError: (e) => live() && callbacks.onError?.(e),
+    onError: (e) => live() && fail(e),
     onBlocked: () => live() && setState({ playing: false }),
     onPreview: (p) => live() && setState({ preview: !!p }),
     onItem: (uri) => live() && setState({ item: uri || null, currentTime: 0 }),
+    // An ad ending also ends a reveal the user asked for with "Show player".
+    onAd: (on) => live() && setState(on ? { ad: true } : { ad: false, reveal: false }),
+    onReveal: (on) => live() && on !== getState().reveal && setState(on ? { reveal: true, error: START_HINT } : { reveal: false }),
   });
   return eng;
 }
@@ -58,19 +78,23 @@ function sync(s) {
   }
   if (t.id !== loadedId) {
     loadedId = t.id;
+    const direct = resolves(t);
+    viaResolver = direct ? t.id : null;
     const eng = engineFor(t);
-    setState({ currentTime: 0, duration: t.duration || 0, preview: false, item: null });
+    const src = direct ? { ...t, src: `${resolverBase()}/v1/audio?id=${encodeURIComponent(t.externalId)}` } : t;
+    setState({ currentTime: 0, duration: t.duration || 0, preview: false, item: null, ad: false, reveal: false, resolved: direct });
     applyVolume(getState());
     Promise.resolve()
-      .then(() => eng.load(t, { autoplay: getState().playing }))
+      .then(() => eng.load(src, { autoplay: getState().playing }))
       .then(() => { if (loadedId === t.id && engine === eng) { applied = { volume: null, muted: null }; applyVolume(getState()); } })
-      .catch((e) => { if (loadedId === t.id) callbacks.onError?.(e); });
+      .catch((e) => { if (loadedId === t.id && engine === eng) fail(e); });
   }
   applyVolume(s);
 }
 
-export function init({ onEnded, onError, embedContainer }) {
+export function init({ onEnded, onError, embedContainer, playback }) {
   callbacks = { onEnded, onError };
+  options = playback || {};
   container = embedContainer;
   subscribe(sync);
   sync(getState());

@@ -1,8 +1,11 @@
-// Engine for anything the browser can play natively: repo tracks, local files, direct URLs, Cloudinary renditions.
+// Engine for anything the browser can play natively: repo tracks, local files, direct URLs, Cloudinary renditions,
+// and YouTube tracks served as audio by the resolver (player.js swaps in the resolver URL as track.src).
 // Engine interface (shared by every file in this folder):
 //   provider, load(track, { autoplay }) -> Promise|void, play(), pause(), seek(seconds),
 //   setVolume(0..1), setMuted(bool), currentTime(), duration(), destroy()
 // Engines report back through `handlers`: onTime, onDuration, onPlay, onPause, onEnded, onError, onBlocked.
+// Optional, provider-specific: onPreview and onItem (Spotify), onAd and onReveal (YouTube).
+// Factories receive { container, handlers, options }, where options is config.json's `playback` block.
 
 export function createHtmlAudio({ handlers }) {
   const audio = new Audio();

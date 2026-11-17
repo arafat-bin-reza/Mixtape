@@ -1,5 +1,13 @@
-// YouTube IFrame Player API engine. The player must stay visible (YouTube API terms), so it is
-// rendered inside the cover slot; ui.js shows that slot whenever a YouTube track is current.
+// YouTube IFrame Player API engine. The player is rendered inside the cover slot. By default it stays
+// visible, as the YouTube API terms require. Two options from config.json `playback` change that, and
+// both knowingly depart from those terms (plan.md, "play linked videos as audio only"):
+//   hideVideo - ui.js covers the player with the artwork. If a play request has not started playback
+//               within 4 s (blocked autoplay on a phone, or a long ad) the engine asks for the player
+//               to be revealed through handlers.onReveal.
+//   muteAds   - an ad cannot be skipped or blocked from outside the iframe, so it is muted instead.
+//               "Quiet" means: playback was requested and the player reports UNSTARTED (-1), or it
+//               reports a video id other than the track's. These signals have not been confirmed
+//               against live ads. Muting while unstarted is harmless when there is no ad.
 import { loadScript } from "./sdk.js";
 
 const API = "https://www.youtube.com/iframe_api";
@@ -18,32 +26,65 @@ function ready() {
   return apiReady;
 }
 
-export function createYouTube({ container, handlers }) {
+const AD_HINT_MS = 1500, START_MS = 4000;
+
+export function createYouTube({ container, handlers, options = {} }) {
+  const { hideVideo = false, muteAds = false } = options;
   let player = null, timer = null, destroyed = false, volume = 1, muted = false, dur = 0;
+  let wantId = null, wantPlay = false, ytState = null, quietSince = 0, inAd = false, startTimer = null;
   const el = document.createElement("div");
   container.append(el);
 
-  const tick = () => { if (player?.getCurrentTime) handlers.onTime(player.getCurrentTime()); };
+  const otherVideo = () => {
+    const id = player?.getVideoData?.()?.video_id;
+    return !!id && !!wantId && id !== wantId;
+  };
+  // Tracks the quiet (suspected ad) state: mutes at once, reports an ad only after it has lasted a moment.
+  const watch = () => {
+    if (!muteAds) return;
+    const quiet = wantPlay && (ytState === -1 || otherVideo());
+    if (quiet !== !!quietSince) { quietSince = quiet ? Date.now() : 0; applyVolume(); }
+    const ad = quiet && Date.now() - quietSince >= AD_HINT_MS;
+    if (ad !== inAd) { inAd = ad; handlers.onAd?.(ad); }
+  };
+  // Ad time is not forwarded, so the seek bar and the logged position stay on the track.
+  const tick = () => { watch(); if (!quietSince && player?.getCurrentTime) handlers.onTime(player.getCurrentTime()); };
+  const expectStart = () => {
+    wantPlay = true;
+    startPoll();
+    clearTimeout(startTimer);
+    if (hideVideo) startTimer = setTimeout(() => handlers.onReveal?.(true), START_MS);
+  };
+  const started = () => { clearTimeout(startTimer); handlers.onReveal?.(false); };
   const stopPoll = () => { clearInterval(timer); timer = null; };
   const startPoll = () => { stopPoll(); timer = setInterval(tick, 250); };
   const applyVolume = () => {
     if (!player?.setVolume) return;
     player.setVolume(Math.round(volume * 100));
-    muted ? player.mute() : player.unMute();
+    muted || quietSince ? player.mute() : player.unMute();
   };
 
   const init = ready().then(() => new Promise((res, rej) => {
     if (destroyed) return res();
     player = new YT.Player(el, {
       width: "100%", height: "100%",
-      playerVars: { playsinline: 1, rel: 0, controls: 1, enablejsapi: 1, origin: location.origin },
+      playerVars: { playsinline: 1, rel: 0, controls: hideVideo ? 0 : 1, enablejsapi: 1, origin: location.origin },
       events: {
         onReady: () => { applyVolume(); res(); },
         onStateChange: (e) => {
           const S = YT.PlayerState;
-          if (e.data === S.PLAYING) { dur = player.getDuration() || dur; if (dur) handlers.onDuration(dur); handlers.onPlay(); startPoll(); }
-          else if (e.data === S.PAUSED) { stopPoll(); tick(); handlers.onPause(); }
-          else if (e.data === S.ENDED) { stopPoll(); handlers.onEnded(); }
+          ytState = e.data;
+          if (e.data === S.PLAYING) wantPlay = true;
+          watch();
+          if (e.data === S.PLAYING) {
+            if (!quietSince) { started(); dur = player.getDuration() || dur; if (dur) handlers.onDuration(dur); }
+            handlers.onPlay(); startPoll();
+          }
+          else if (e.data === S.PAUSED) { wantPlay = false; clearTimeout(startTimer); stopPoll(); tick(); handlers.onPause(); }
+          else if (e.data === S.ENDED) {
+            if (muteAds && otherVideo()) return; // an ad finished, not the track
+            wantPlay = false; clearTimeout(startTimer); stopPoll(); watch(); handlers.onEnded();
+          }
           else if (e.data === S.CUED) { dur = player.getDuration() || dur; if (dur) handlers.onDuration(dur); }
         },
         onError: (e) => { stopPoll(); const err = new Error(ERRORS[e.data] || "YouTube error"); handlers.onError(err); rej(err); },
@@ -58,10 +99,12 @@ export function createYouTube({ container, handlers }) {
       await init;
       if (destroyed) return;
       dur = track.duration || 0;
+      wantId = track.externalId; ytState = null; wantPlay = false;
+      if (autoplay) expectStart();
       autoplay ? player.loadVideoById(track.externalId) : player.cueVideoById(track.externalId);
     },
-    play() { init.then(() => player?.playVideo?.()).catch(() => {}); },
-    pause() { player?.pauseVideo?.(); },
+    play() { expectStart(); init.then(() => player?.playVideo?.()).catch(() => {}); },
+    pause() { wantPlay = false; clearTimeout(startTimer); player?.pauseVideo?.(); },
     seek(t) { player?.seekTo?.(t, true); return t; },
     setVolume(v) { volume = v; applyVolume(); },
     setMuted(m) { muted = m; applyVolume(); },
@@ -70,6 +113,7 @@ export function createYouTube({ container, handlers }) {
     destroy() {
       destroyed = true;
       stopPoll();
+      clearTimeout(startTimer);
       try { player?.destroy(); } catch { /* ignore */ }
       player = null;
       el.remove();

@@ -18,7 +18,7 @@ const setPct = (el, v, max) => el.style.setProperty("--pct", max ? `${(v / max) 
 const dialogOpen = () => !!document.querySelector("dialog[open]");
 const setStatus = (el, msg, err = false) => { el.textContent = msg; el.classList.toggle("err", err); };
 
-let dragging = false, toastTimer, last = {};
+let dragging = false, toastTimer, last = {}, hideVideo = false;
 // Providers whose player must stay visible; they render inside the cover slot.
 const EMBEDDED = new Set(["youtube", "spotify"]);
 
@@ -128,6 +128,11 @@ function render(s) {
   $("mute-icon").setAttribute("href", s.muted || s.volume === 0 ? "#i-mute" : "#i-vol");
   $("mute").setAttribute("aria-label", s.muted ? "Unmute" : "Mute");
   $("preview-hint").hidden = !s.preview;
+  $("ad-hint").hidden = !s.ad;
+  // A YouTube track played through the resolver is plain audio: there is no embed to show.
+  if (t?.provider === "youtube") $("cover").dataset.embed = s.resolved ? "" : "youtube";
+  // Audio only: the artwork covers the YouTube player unless it has to be shown (blocked start, or "Show player").
+  $("cover").toggleAttribute("data-audio-only", hideVideo && t?.provider === "youtube" && !s.reveal);
   if (s.error && s.error !== last.error) toast(s.error);
   last.error = s.error;
 }
@@ -327,7 +332,10 @@ function applyTheme(theme) {
   if (theme) document.documentElement.dataset.theme = theme;
 }
 
-export function initUI({ onPrev, onNext }) {
+export function initUI({ onPrev, onNext, playback }) {
+  hideVideo = !!playback?.hideVideo;
+  $("ad-show").hidden = !hideVideo;
+  $("ad-show").onclick = () => setState({ reveal: true });
   applyTheme(storage.load("theme", null));
   subscribe(render);
 

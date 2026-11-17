@@ -7,6 +7,10 @@
     "allowUploaderShare": false,
     "maxBytes": 104857600
   },
+  "playback": {
+    "hideVideo": true,
+    "muteAds": true
+  },
   "audit": {
     "endpoint": "https://mixtape-audit.mixtape-audit-collector.workers.dev/v1/events",
     "flushSeconds": 15,

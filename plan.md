@@ -222,3 +222,142 @@ After the console change in §3.8, manual checks on the live preset with a real 
 - Showing the picture of an uploaded video; uploads are audio-only by design.
 - Transcoding in the browser for formats neither Cloudinary nor the browser can decode.
 - Direct media links ("Add link"), which are already probed rather than filtered by extension.
+
+---
+
+# Plan: play linked videos as audio only, and keep ads from being heard
+
+## 1. Goal
+
+For a link track that comes from a video service, Mixtape shows no video: the cover slot shows the track's artwork like any other song, and only the audio is heard. Advertisements that the provider inserts are skipped automatically where that is possible, and silenced automatically where it is not.
+
+## 2. Current behaviour
+
+| Provider | Engine | Picture today | Ads today |
+|---|---|---|---|
+| YouTube | `engines/youtube.js`, IFrame Player API | Shown. `ui.js` lists it in `EMBEDDED`, so `#cover` gets `data-embed="youtube"` and `css/style.css` line 69 stretches `#embed` over the cover slot. | YouTube plays its own pre-roll and mid-roll ads inside the iframe, with sound. |
+| Spotify | `engines/spotify.js`, embed iFrame API | Shown (Spotify's own player card, 352 px). | Decided by Spotify and the visitor's account. |
+| Vimeo | `engines/vimeo.js` | Already hidden: `#embed` stays 1 px, opacity 0. | None in the embed. |
+| SoundCloud | `engines/soundcloud.js` | Already hidden, same way. | Rare in the widget. |
+| Direct links, uploads, repo tracks | `engines/html-audio.js` | Never shown (`new Audio()` decodes the soundtrack only). | None. |
+
+So the work is almost entirely about YouTube. Two facts limit what the page can do there:
+
+- **The player is a cross-origin iframe.** Page JavaScript cannot read or click anything inside it. There is no way to press "Skip ad", remove the ad, or block the ad request from `ui.js` or an engine. The IFrame API has no ad events and no skip call.
+- **The YouTube API terms forbid both things this plan asks for.** They require the player to stay visible (at least 200 × 200 px, not covered) and forbid blocking or interfering with ads. The header comment in `youtube.js` and `CLAUDE.md` record the visibility rule as a constraint. Going ahead means knowingly dropping it on a public site; the realistic consequence is YouTube refusing to play embeds for the site's origin. This is the owner's call (§8).
+
+## 3. Design
+
+Two phases. Phase 1 is client-only, ships on GitHub Pages, and delivers "no picture" fully and "ads" partly (silenced, not skipped). Phase 2 is the only way to get real ad-free audio, needs a server, and is optional.
+
+### 3.1 Phase 1a: hide the YouTube picture
+
+Keep the iframe where it is and at full size, and put the artwork on top of it, rather than shrinking it to 1 px. A full-size iframe keeps the browser treating it as an on-screen player (hidden or tiny cross-origin frames are the first thing browsers throttle), and it keeps `data-embed="youtube"` on `#cover`, so the existing tests and the 280 px cover rule are untouched.
+
+- `config.json`: new block `"playback": { "hideVideo": true, "muteAds": true }`. Both default to `false` when absent, so forks and the tests (which stub `config.json` to `{}`) keep today's behaviour.
+- `app.js` passes `config.playback` to `initUI` and to `player.init`.
+- `ui.js` `renderTrack()`: when `hideVideo` is on and the track is YouTube, set `#cover` `data-audio-only=""`.
+- `css/style.css`: `.cover[data-audio-only] .embed{opacity:0;pointer-events:none}` and an override so `#cover-img` / `#cover-letter` stay displayed. YouTube tracks already carry a thumbnail in `track.cover` (`url-tracks.js` falls back to `i.ytimg.com/vi/<id>/hqdefault.jpg`).
+- `youtube.js` `playerVars`: `controls: 0`, since the controls can no longer be reached. Mixtape's own play, seek and volume controls already drive the player through the API.
+
+**Tap-to-start fallback.** Mobile browsers may refuse `playVideo()` when the tap happened on Mixtape's button instead of inside the iframe. Today the visitor can tap the visible player; hidden, they would be stuck. So: if a play request has not produced a `PLAYING` state within 4 s, the engine calls `handlers.onBlocked()` plus a new `handlers.onReveal(true)`; `player.js` mirrors it into a new state field `reveal`, and `ui.js` drops `data-audio-only` while it is set, showing the player with a toast "Tap the player to start". The first `PLAYING` event clears it and the artwork returns.
+
+Spotify stays visible. Its card is not a video, its volume control exists only inside the embed (`#vol-hint`), and logging in happens there.
+
+### 3.2 Phase 1b: silence YouTube ads
+
+Since an ad cannot be skipped from outside the iframe, detect it and mute it.
+
+- **Detection (must be confirmed by the spike in §4 step 1).** Candidates, all readable through the API: `player.getVideoData().video_id` differs from `track.externalId`; `getDuration()` differs from the content duration by more than a few seconds; the player state stays `UNSTARTED` (-1) or `BUFFERING` while audio is audible. The engine keeps an `inAd` flag from whichever signal proves reliable, checked in the existing 250 ms poll and in `onStateChange`.
+- **While `inAd`:** call `player.mute()` regardless of the user's volume; do not forward `onTime` / `onDuration` (so the seek bar does not jump and the audit log's listening time and `play_end` position are not polluted by ad time); report `handlers.onAd(true)`, mirrored into state as `ad`, and `ui.js` shows a hint next to `#preview-hint`: "Ad playing (muted)".
+- **When the ad ends:** restore the user's volume and mute setting through the existing `applyVolume()`, clear `ad`, resume forwarding time.
+- **If no signal is reliable:** fall back to muting from `load()` until the first `PLAYING` state whose `getCurrentTime()` is advancing on the right video. This covers pre-rolls only; mid-rolls would be heard.
+- **Skippable ads.** The hint gets a "Show player" button that sets `reveal`, so the visitor can click YouTube's own Skip button; the artwork returns when the ad ends. Unskippable ads are waited out in silence.
+
+What this does not do: the ad still loads and still takes its time. It is muted, not blocked. That is the ceiling for client-side code.
+
+### 3.3 Phase 2 (optional): a resolver, for true ad-free audio
+
+The only way to hear a YouTube track with no ad and no video at all is to not use the embed: a server finds the video's audio-only stream and the existing `html-audio` engine plays it as a direct URL.
+
+- A separate deployment (`resolver/`, like `collector/`), never imported by the site; `config.json` gets `playback.resolver: "<url>"`. When it is set, `player.js` `providerOf()` routes YouTube tracks to `html-audio` with `src = <resolver>/v1/audio?id=<externalId>`; when the resolver fails, it falls back to the embed engine from Phase 1.
+- It cannot be a plain Cloudflare Worker. Finding the stream needs `yt-dlp` or equivalent (signature deciphering changes often), and stream URLs are tied to the requesting IP and expire, so the server must also proxy the audio bytes with Range support. That means a small VPS or container, real bandwidth, and regular breakage whenever YouTube changes its player.
+- This is extraction of content from YouTube, which its terms prohibit outright, and on a public site it invites blocking of the server's IP and complaints to the host. Recommendation: do not build it for the live site. If it is wanted for personal use, run it privately and point a local `config.json` at it.
+
+SoundCloud, Vimeo and Spotify are not covered: the first two have no ad problem worth solving, and Spotify streams are DRM-protected.
+
+## 4. Changes (Phase 1)
+
+Steps in order:
+
+1. **Spike, no commit.** With `npm run serve` (audit endpoint blanked locally), play two or three monetised YouTube videos and log `getPlayerState()`, `getVideoData()`, `getDuration()` and `getCurrentTime()` every 250 ms through a pre-roll and a mid-roll. Also try the hidden player on Android Chrome and iOS Safari. Pick the detection signal and confirm whether the tap-to-start fallback is needed. If no signal works, Phase 1b shrinks to the pre-roll fallback.
+2. Implement:
+
+| File | Change |
+|---|---|
+| `config.json` | Add `playback.hideVideo` and `playback.muteAds`. |
+| `js/app.js` | Pass `config.playback` to `initUI` and `player.init`. |
+| `js/state.js` | New fields `ad: false`, `reveal: false`. |
+| `js/player.js` | `onAd` and `onReveal` handlers in `make()`; reset both in `sync()` on track change; pass options to the YouTube factory. |
+| `js/engines/youtube.js` | `controls: 0` when hidden; `inAd` detection, mute and restore; suppress time during ads; play-request timeout calling `onBlocked` / `onReveal`. Update the header comment. |
+| `js/ui.js` | `data-audio-only` on `#cover`; ad hint with "Show player"; honour `state.reveal`. |
+| `css/style.css` | The `data-audio-only` rules. |
+| `index.html` | `#ad-hint` element; adjust the YouTube wording in the page copy. |
+| `README.md`, `CLAUDE.md` | YouTube is audio-only with muted ads when `playback` is set; replace the "must stay visible" statement with the decision from §8; `onAd` / `onReveal` in the engine handler list. |
+
+No change to `url-tracks.js`, `playlist.js`, the other engines or the collector. `audit.js` needs nothing as long as ad time is not forwarded; no new event is logged.
+
+## 5. Tests
+
+`tests/links.spec.js`, extending the fake `window.YT` (it already has `getDuration()` and `PlayerState`); add `getVideoData()`, `mute()` / `unMute()` recording, and a way to put the fake into an "ad" state:
+
+- with `config.json` stubbed to `{ playback: { hideVideo: true } }`: a YouTube track gives `#cover` both `data-embed="youtube"` and `data-audio-only`, `#cover-img` is visible, and `#embed` has opacity 0;
+- with `{}`: no `data-audio-only` (today's behaviour, existing assertions unchanged);
+- with `muteAds`: the fake enters the ad state → `mute()` was called, `#ad-hint` is visible, the seek bar does not move; the ad ends → the user's mute setting is restored and the hint is hidden;
+- "Show player" removes `data-audio-only` until the ad ends;
+- the fake never reaches `PLAYING` after a play request → `#play` returns to Play and the player is revealed.
+
+The 320 px smoke test and the Spotify tests must pass unchanged.
+
+## 6. Verification
+
+```bash
+npm run test:unit
+npx playwright test tests/links.spec.js
+npm test
+```
+
+In PowerShell, when port 8000 is taken: `$env:PORT = 8010; npx playwright test tests/links.spec.js`.
+
+Manual, on the real YouTube player (the tests only see a fake): a monetised video with a pre-roll, one long enough for a mid-roll, a video with embedding disabled (existing error path), and the same on a phone. Check that nothing is heard during ads, the volume comes back afterwards, the seek bar and time are right after an ad, and the next track starts when the video ends.
+
+## 7. Out of scope
+
+- Blocking ad requests or skipping ads from page code: not possible across the iframe boundary.
+- Hiding the Spotify player or doing anything about Spotify ads.
+- A browser extension or user-script, which could skip ads but is not part of the site.
+- Phase 2, unless the owner opts in (§8).
+
+## 8. Decisions needed from the owner before coding
+
+1. **Accept the YouTube terms conflict?** Hiding the player and muting ads both break the YouTube API terms on a public site. If not accepted, the compliant version of this plan is: leave YouTube as it is, and recommend direct links or uploads for ad-free, picture-free playback, which already works.
+2. **Phase 2 resolver:** recommended no for the live site (§3.3).
+
+## 9. Status
+
+The owner chose to go ahead with both phases. Both are implemented and covered by tests against fakes; neither has been run against the real YouTube.
+
+| Part | State |
+|---|---|
+| Phase 1a, hide the picture | Done as designed. `playback.hideVideo` is `true` in `config.json`. |
+| Phase 1b, mute ads | Done. `playback.muteAds` is `true`. The engine mutes while playback is wanted and the player reports `UNSTARTED` (-1) or a video id other than the track's. The `getDuration()` signal was dropped: YouTube tracks have no stored duration to compare with. |
+| Phase 2, resolver | Done: `resolver/` plus the routing and fallback in `player.js`. `playback.resolver` is set to `http://127.0.0.1:8790` in the working copy for local use; whether to commit it is the owner's decision. |
+
+Differences from the text above:
+
+- **§4 step 1, the spike, was not done.** It needs real monetised videos and phones. The two ad signals are therefore unconfirmed; if YouTube reports neither during an ad, the ad is heard as before.
+- **§3.1 tap-to-start:** on the 4 s timeout the engine calls `onReveal` only, not `onBlocked`. A long pre-roll looks the same as a blocked start, and marking it paused would stop the next track from starting on its own. So `#play` keeps showing Pause while the player is revealed.
+- **§3.2 listening time:** the audit log measures wall-clock time while `state.playing` is true, so time spent in a muted ad still counts towards the track. Only the position is kept clean.
+- **§3.3:** checked by hand on 2026-11-17 with a real `yt-dlp`: several videos played and seeked in Edge through the resolver with no embed loaded. YouTube refuses a new stream URL for about 5 s, so the server waits for the URL's `available_at` time; a first play takes 10 to 15 s.
+
+Still to do by hand (§6): play monetised videos with a pre-roll and a mid-roll on desktop, Android Chrome and iOS Safari, on the embed path (resolver off or failing).

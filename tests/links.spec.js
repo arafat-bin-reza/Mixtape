@@ -125,6 +125,9 @@ test("YouTube link uses oEmbed metadata and the stubbed player", async ({ page }
   await row.locator(".row").click();
   await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
   await expect(page.locator("#cover")).toHaveAttribute("data-embed", "youtube");
+  // No playback options in config.json: the player stays visible and nothing is covered.
+  await expect(page.locator("#cover")).not.toHaveAttribute("data-audio-only", "");
+  await expect(page.locator("#embed")).toHaveCSS("opacity", "1");
   await expect(page.locator("#dur")).toHaveText("3:33");
   expect(await page.evaluate(() => window.__yt.calls[0])).toEqual(["load", "dQw4w9WgXcQ"]);
 
@@ -162,6 +165,180 @@ async function stubSpotify(page, oembed = () => ({ title: "Stub Song", thumbnail
     window.onSpotifyIframeApiReady?.(api);
   ` }));
 }
+
+test("YouTube with playback options: artwork covers the player and suspected ads are muted", async ({ page }) => {
+  await page.route("**/config.json", (r) => r.fulfill({ json: { playback: { hideVideo: true, muteAds: true } } }));
+  await page.route("**/oembed**", (r) => r.fulfill({ json: { title: "Stub Video", author_name: "Stub Channel" } }));
+  await page.route("https://noembed.com/**", (r) => r.fulfill({ json: {} }));
+  await page.route("https://i.ytimg.com/**", (r) => r.fulfill({ status: 404, body: "" }));
+  await page.addInitScript(() => {
+    window.__yt = { sound: [], ad: null };
+    class Player {
+      constructor(el, opts) {
+        this.opts = opts; window.__yt.player = this;
+        setTimeout(() => opts.events.onReady({ target: this }), 0);
+      }
+      state(s) { this.opts.events.onStateChange({ data: s, target: this }); }
+      // Stays unstarted after a load, as the real player does while a pre-roll ad runs.
+      loadVideoById(id) { this.id = id; this.state(-1); }
+      cueVideoById(id) { this.id = id; this.state(5); }
+      playVideo() {} pauseVideo() { this.state(2); } seekTo() {}
+      getCurrentTime() { return 7; }
+      getDuration() { return 213; }
+      getVideoData() { return { video_id: window.__yt.ad || this.id }; }
+      setVolume() {} destroy() {}
+      mute() { window.__yt.sound.push("mute"); }
+      unMute() { window.__yt.sound.push("unmute"); }
+    }
+    window.YT = { Player, PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } };
+  });
+  const lastSound = () => page.evaluate(() => window.__yt.sound.at(-1));
+  const cover = page.locator("#cover");
+
+  await page.goto("/");
+  await expect(page.locator("#ad-hint")).toBeHidden();
+  await page.click("#add-link");
+  await page.fill("#link-url", "https://youtu.be/dQw4w9WgXcQ");
+  await expect(page.locator("#link-add")).toBeEnabled();
+  await page.click("#link-add");
+  await page.locator("#tracks li").last().locator(".row").click();
+
+  // Pre-roll: the player is covered by the artwork and muted, then the hint appears.
+  await expect(cover).toHaveAttribute("data-embed", "youtube");
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+  await expect(page.locator("#embed")).toHaveCSS("opacity", "0");
+  await expect(page.locator("#cover-letter")).toBeVisible();
+  await expect.poll(lastSound).toBe("mute");
+  await expect(page.locator("#ad-hint")).toBeVisible();
+  await expect(page.locator("#cur")).toHaveText("0:00"); // the fake reports 7 s, but ad time is not forwarded
+  // Nothing has started after 4 s, so the player is shown for a tap or a Skip click.
+  await expect(cover).not.toHaveAttribute("data-audio-only", "", { timeout: 8000 });
+  await expect(page.locator("#embed")).toHaveCSS("opacity", "1");
+
+  // The track itself starts: sound back, hint gone, artwork back, time and duration flow again.
+  await page.evaluate(() => window.__yt.player.state(1));
+  await expect.poll(lastSound).toBe("unmute");
+  await expect(page.locator("#ad-hint")).toBeHidden();
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+  await expect(page.locator("#dur")).toHaveText("3:33");
+  await expect(page.locator("#cur")).toHaveText("0:07");
+
+  // Mid-roll: the player reports another video. "Show player" uncovers it until the ad ends.
+  await page.evaluate(() => { window.__yt.ad = "AD0000000ad"; });
+  await expect.poll(lastSound).toBe("mute");
+  await expect(page.locator("#ad-hint")).toBeVisible();
+  await page.click("#ad-show");
+  await expect(cover).not.toHaveAttribute("data-audio-only", "");
+  // The ad's own "ended" event must not advance the playlist.
+  await page.evaluate(() => window.__yt.player.state(0));
+  await expect(page.locator("#tracks li").last()).toHaveAttribute("aria-current", "true");
+  await page.evaluate(() => { window.__yt.ad = null; window.__yt.player.state(1); });
+  await expect.poll(lastSound).toBe("unmute");
+  await expect(page.locator("#ad-hint")).toBeHidden();
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+});
+
+test("YouTube with hideVideo alone covers the player but never mutes it", async ({ page }) => {
+  await page.route("**/config.json", (r) => r.fulfill({ json: { playback: { hideVideo: true } } }));
+  await page.route("**/oembed**", (r) => r.fulfill({ json: { title: "Stub Video", author_name: "Stub Channel" } }));
+  await page.route("https://noembed.com/**", (r) => r.fulfill({ json: {} }));
+  await page.route("https://i.ytimg.com/**", (r) => r.fulfill({ status: 404, body: "" }));
+  await page.addInitScript(() => {
+    window.__yt = { sound: [], vars: null };
+    class Player {
+      constructor(el, opts) { this.opts = opts; window.__yt.vars = opts.playerVars; window.__yt.player = this; setTimeout(() => opts.events.onReady({ target: this }), 0); }
+      state(s) { this.opts.events.onStateChange({ data: s, target: this }); }
+      loadVideoById() { this.state(-1); }
+      cueVideoById() { this.state(5); }
+      playVideo() {} pauseVideo() { this.state(2); } seekTo() {}
+      getCurrentTime() { return 0; } getDuration() { return 213; }
+      getVideoData() { return { video_id: "AD0000000ad" }; }
+      setVolume() {} destroy() {}
+      mute() { window.__yt.sound.push("mute"); }
+      unMute() { window.__yt.sound.push("unmute"); }
+    }
+    window.YT = { Player, PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } };
+  });
+
+  await page.goto("/");
+  await page.click("#add-link");
+  await page.fill("#link-url", "https://youtu.be/dQw4w9WgXcQ");
+  await expect(page.locator("#link-add")).toBeEnabled();
+  await page.click("#link-add");
+  await page.locator("#tracks li").last().locator(".row").click();
+
+  const cover = page.locator("#cover");
+  await expect(cover).toHaveAttribute("data-embed", "youtube");
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+  expect(await page.evaluate(() => window.__yt.vars.controls)).toBe(0);
+  // Still unstarted after 4 s: the player is uncovered. With muteAds off nothing is muted and no hint is shown,
+  // even though the fake looks exactly like an ad.
+  await expect(cover).not.toHaveAttribute("data-audio-only", "", { timeout: 8000 });
+  await expect(page.locator("#ad-hint")).toBeHidden();
+  expect(await page.evaluate(() => window.__yt.sound.includes("mute"))).toBe(false);
+  await page.evaluate(() => window.__yt.player.state(1));
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+});
+
+test("YouTube through the resolver plays as plain audio, and falls back to the embed when it fails", async ({ page }) => {
+  const RESOLVER = "https://resolver.test";
+  await page.route("**/config.json", (r) => r.fulfill({ json: { playback: { hideVideo: true, muteAds: true, resolver: `${RESOLVER}/` } } }));
+  await page.route("**/oembed**", (r) => r.fulfill({ json: { title: "Stub Video", author_name: "Stub Channel" } }));
+  await page.route("https://noembed.com/**", (r) => r.fulfill({ json: {} }));
+  await page.route("https://i.ytimg.com/**", (r) => r.fulfill({ status: 404, body: "" }));
+  const asked = [];
+  await page.route(`${RESOLVER}/**`, (r) => {
+    const url = new URL(r.request().url());
+    asked.push(url.pathname + url.search);
+    if (url.searchParams.get("id") === "dQw4w9WgXcQ") return r.fulfill({ body: readFileSync("tests/fixtures/tone.wav"), contentType: "audio/wav" });
+    r.fulfill({ status: 502, body: "Could not resolve this video" });
+  });
+  await page.addInitScript(() => {
+    window.__yt = { calls: [] };
+    class Player {
+      constructor(el, opts) { this.opts = opts; setTimeout(() => opts.events.onReady({ target: this }), 0); }
+      state(s) { this.opts.events.onStateChange({ data: s, target: this }); }
+      loadVideoById(id) { window.__yt.calls.push(["load", id]); this.state(1); }
+      cueVideoById(id) { window.__yt.calls.push(["cue", id]); this.state(5); }
+      playVideo() { this.state(1); } pauseVideo() { this.state(2); } seekTo() {}
+      getCurrentTime() { return 0; } getDuration() { return 213; }
+      setVolume() {} mute() {} unMute() {} destroy() {}
+    }
+    window.YT = { Player, PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } };
+  });
+  const add = async (link) => {
+    await page.click("#add-link");
+    await page.fill("#link-url", link);
+    await expect(page.locator("#link-add")).toBeEnabled();
+    await page.click("#link-add");
+  };
+  const cover = page.locator("#cover");
+
+  await page.goto("/");
+  await add("https://youtu.be/dQw4w9WgXcQ");
+  const good = page.locator("#tracks li").last();
+  await expect(good.locator(".badge")).toHaveText("YouTube");
+  await good.locator(".row").click();
+
+  // Served by the resolver: the html engine plays it, there is no embed, and the YouTube player is never built.
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+  await expect(page.locator("#dur")).toHaveText("0:02");
+  await expect(cover).toHaveAttribute("data-embed", "");
+  await expect(page.locator("#ad-hint")).toBeHidden();
+  expect(asked[0]).toBe("/v1/audio?id=dQw4w9WgXcQ");
+  expect(await page.evaluate(() => window.__yt.calls.length)).toBe(0);
+
+  // The resolver refuses this one: the track is not marked as failed, the embed takes over.
+  await add("https://youtu.be/aaaaaaaaaaa");
+  const bad = page.locator("#tracks li").last();
+  await bad.locator(".row").click();
+  await expect(cover).toHaveAttribute("data-embed", "youtube");
+  await expect(cover).toHaveAttribute("data-audio-only", "");
+  await expect.poll(() => page.evaluate(() => window.__yt.calls[0])).toEqual(["load", "aaaaaaaaaaa"]);
+  await expect(bad).toHaveAttribute("aria-current", "true");
+  await expect(bad).not.toHaveClass(/bad/);
+  await expect(page.locator("#play")).toHaveAttribute("aria-label", "Pause");
+});
 
 test("Spotify link plays through the stubbed embed and reports preview, pause and end", async ({ page }) => {
   await stubSpotify(page);
@@ -253,6 +430,8 @@ test("Spotify album is one row whose heading follows the item being played, and 
 
 test("pasting a link on the page opens the dialog pre-filled", async ({ page }) => {
   await page.goto("/");
+  // The paste listener is registered during startup, after config.json has loaded; rows appear after that.
+  await expect(page.locator("#tracks li").first()).toBeVisible();
   await page.evaluate((url) => {
     const dt = new DataTransfer();
     dt.setData("text/plain", url);

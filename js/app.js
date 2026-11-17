@@ -37,6 +37,7 @@ audit.configure(config.audit);
 
 player.init({
   embedContainer: document.getElementById("embed"),
+  playback: config.playback,
   onEnded() {
     if (getState().repeat === "one") { player.seek(0); player.play(); }
     else if (!playlist.next()) setState({ playing: false });
@@ -50,7 +51,7 @@ player.init({
     if (!playlist.next()) setState({ playing: false });
   },
 });
-initUI({ onPrev, onNext });
+initUI({ onPrev, onNext, playback: config.playback });
 initMediaSession({ play: player.play, pause: player.pause, prev: onPrev, next: onNext, seekTo: player.seek });
 
 const [repo, { tracks: mine, warning }, urls, shared] = await Promise.all([loadRepoTracks(), local.loadAll(), urlTracks.loadAll(), cloud.loadShared()]);
